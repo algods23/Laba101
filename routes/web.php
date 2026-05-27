@@ -49,7 +49,10 @@ Route::middleware('auth')->group(function () {
         Route::patch('/staff/{user}', [PageController::class, 'updateStaff'])->name('staff.update');
         Route::delete('/staff/{user}', [PageController::class, 'destroyStaff'])->name('staff.destroy');
         Route::get('/settings', [PageController::class, 'settings'])->name('settings.index');
+        Route::patch('/settings', [PageController::class, 'updateSettings'])->name('settings.update');
     });
+
+    Route::post('/reports/email', [PageController::class, 'emailReport'])->name('reports.email');
 
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
 });

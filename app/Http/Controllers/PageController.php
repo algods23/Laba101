@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Mail\ReportMail;
 use App\Models\DailySale;
 use App\Models\DisbursementExpense;
 use App\Models\ItemCategory;
@@ -13,6 +14,7 @@ use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -273,138 +275,145 @@ class PageController extends Controller
         $reportTypes = $validated['report_types'];
         $filename = 'laba101-reports-'.$from->format('Y-m-d').'-to-'.$to->format('Y-m-d').'.xls';
 
-        return response()->streamDownload(function () use ($from, $to, $reportTypes) {
-            $salesTotal = 0.0;
-            $salesCashTotal = 0.0;
-            $salesGcashTotal = 0.0;
-            $disbursementTotal = 0.0;
-            $worksheets = [];
+        $fileContent = $this->generateReportContent($from, $to, $reportTypes);
 
-            if (in_array('sales', $reportTypes, true)) {
-                $orders = LaundryOrder::query()
-                    ->with(['customer', 'service', 'itemCategory', 'payments'])
-                    ->whereBetween('created_at', [$from, $to])
-                    ->oldest()
-                    ->get();
-                $manualSales = $this->dailySalesBetween($from, $to);
-
-                $salesRows = [
-                    ['Laba101 POS Export'],
-                    ['Date from', $from->format('Y-m-d')],
-                    ['Date to', $to->format('Y-m-d')],
-                    [],
-                    ['Sales Reports'],
-                    ['Date', 'Order No.', 'Customer', 'Service', 'Item Category', 'Status', 'Weight KG', 'Total Amount', 'Cash Paid', 'GCash Paid', 'Paid Amount', 'Balance'],
-                ];
-
-                foreach ($orders as $order) {
-                    ['cash' => $cashPaid, 'gcash' => $gcashPaid] = $this->orderPaymentAmounts($order);
-
-                    $salesTotal += (float) $order->paid_amount;
-                    $salesCashTotal += $cashPaid;
-                    $salesGcashTotal += $gcashPaid;
-
-                    $salesRows[] = [
-                        $order->created_at->format('Y-m-d h:i A'),
-                        $order->order_number,
-                        $order->customer?->name,
-                        $order->service?->name,
-                        $order->itemCategory?->name,
-                        str($order->status)->headline(),
-                        $order->weight_kg,
-                        number_format((float) $order->total_amount, 2, '.', ''),
-                        number_format($cashPaid, 2, '.', ''),
-                        number_format($gcashPaid, 2, '.', ''),
-                        number_format((float) $order->paid_amount, 2, '.', ''),
-                        number_format($order->balance, 2, '.', ''),
-                    ];
-                }
-
-                $salesRows[] = [];
-                $salesRows[] = ['Manual Daily Sales'];
-                $salesRows[] = ['Sales #', 'Date', 'Cash', 'GCash', 'Total Amount', 'Notes'];
-
-                foreach ($manualSales as $dailySale) {
-                    $salesTotal += (float) $dailySale->amount;
-                    $salesCashTotal += (float) $dailySale->cash_amount;
-                    $salesGcashTotal += (float) $dailySale->gcash_amount;
-
-                    $salesRows[] = [
-                        $dailySale->sale_number,
-                        $dailySale->sale_date->format('Y-m-d'),
-                        number_format((float) $dailySale->cash_amount, 2, '.', ''),
-                        number_format((float) $dailySale->gcash_amount, 2, '.', ''),
-                        number_format((float) $dailySale->amount, 2, '.', ''),
-                        $dailySale->notes,
-                    ];
-                }
-
-                $salesRows[] = ['Sales total', '', '', '', '', '', '', '', number_format($salesCashTotal, 2, '.', ''), number_format($salesGcashTotal, 2, '.', ''), number_format($salesTotal, 2, '.', '')];
-                $worksheets['Sales Reports'] = $salesRows;
-            }
-
-            if (in_array('disbursement', $reportTypes, true)) {
-                $expenses = $this->disbursementExpenses()
-                    ->filter(fn (array $expense) => $expense['export_date']->betweenIncluded($from, $to))
-                    ->values();
-
-                $disbursementRows = [
-                    ['Laba101 POS Export'],
-                    ['Date from', $from->format('Y-m-d')],
-                    ['Date to', $to->format('Y-m-d')],
-                    [],
-                    ['Disbursement Reports'],
-                    ['Date', 'Disbursement #', 'Name', 'Category', 'Description', 'Amount'],
-                ];
-
-                foreach ($expenses as $expense) {
-                    $disbursementTotal += (float) $expense['amount'];
-                    $disbursementRows[] = [
-                        $expense['export_date']->format('Y-m-d'),
-                        $expense['disbursement_number'],
-                        $expense['name'],
-                        $expense['category'],
-                        $expense['description'],
-                        number_format((float) $expense['amount'], 2, '.', ''),
-                    ];
-                }
-
-                $disbursementRows[] = ['Disbursement total', '', '', number_format($disbursementTotal, 2, '.', '')];
-                $worksheets['Disbursement Reports'] = $disbursementRows;
-            }
-
-            if (in_array('summary', $reportTypes, true)) {
-                if (! in_array('sales', $reportTypes, true)) {
-                    $salesTotals = $this->salesTotalsBetween($from, $to);
-                    $salesTotal = $salesTotals['total'];
-                    $salesCashTotal = $salesTotals['cash'];
-                    $salesGcashTotal = $salesTotals['gcash'];
-                }
-
-                if (! in_array('disbursement', $reportTypes, true)) {
-                    $disbursementTotal = (float) $this->disbursementExpenses()
-                        ->filter(fn (array $expense) => $expense['export_date']->betweenIncluded($from, $to))
-                        ->sum('amount');
-                }
-
-                $worksheets['Summary'] = [
-                    ['Laba101 POS Export'],
-                    ['Date from', $from->format('Y-m-d')],
-                    ['Date to', $to->format('Y-m-d')],
-                    [],
-                    ['Summary'],
-                    ['Sales', number_format($salesTotal, 2, '.', '')],
-                    ['Sales Cash', number_format($salesCashTotal, 2, '.', '')],
-                    ['Sales GCash', number_format($salesGcashTotal, 2, '.', '')],
-                    ['Disbursement', number_format($disbursementTotal, 2, '.', '')],
-                    ['Sales - Disbursement', number_format($salesTotal - $disbursementTotal, 2, '.', '')],
-                ];
-            }
-
-            echo $this->buildExcelWorkbook($worksheets);
+        return response()->streamDownload(function () use ($fileContent) {
+            echo $fileContent;
         }, $filename, [
             'Content-Type' => 'application/vnd.ms-excel',
         ]);
+    }
+
+    private function generateReportContent(CarbonImmutable $from, CarbonImmutable $to, array $reportTypes): string
+    {
+        $salesTotal = 0.0;
+        $salesCashTotal = 0.0;
+        $salesGcashTotal = 0.0;
+        $disbursementTotal = 0.0;
+        $worksheets = [];
+
+        if (in_array('sales', $reportTypes, true)) {
+            $orders = LaundryOrder::query()
+                ->with(['customer', 'service', 'itemCategory', 'payments'])
+                ->whereBetween('created_at', [$from, $to])
+                ->oldest()
+                ->get();
+            $manualSales = $this->dailySalesBetween($from, $to);
+
+            $salesRows = [
+                ['Laba101 POS Export'],
+                ['Date from', $from->format('Y-m-d')],
+                ['Date to', $to->format('Y-m-d')],
+                [],
+                ['Sales Reports'],
+                ['Date', 'Order No.', 'Customer', 'Service', 'Item Category', 'Status', 'Weight KG', 'Total Amount', 'Cash Paid', 'GCash Paid', 'Paid Amount', 'Balance'],
+            ];
+
+            foreach ($orders as $order) {
+                ['cash' => $cashPaid, 'gcash' => $gcashPaid] = $this->orderPaymentAmounts($order);
+
+                $salesTotal += (float) $order->paid_amount;
+                $salesCashTotal += $cashPaid;
+                $salesGcashTotal += $gcashPaid;
+
+                $salesRows[] = [
+                    $order->created_at->format('Y-m-d h:i A'),
+                    $order->order_number,
+                    $order->customer?->name,
+                    $order->service?->name,
+                    $order->itemCategory?->name,
+                    str($order->status)->headline(),
+                    $order->weight_kg,
+                    number_format((float) $order->total_amount, 2, '.', ''),
+                    number_format($cashPaid, 2, '.', ''),
+                    number_format($gcashPaid, 2, '.', ''),
+                    number_format((float) $order->paid_amount, 2, '.', ''),
+                    number_format($order->balance, 2, '.', ''),
+                ];
+            }
+
+            $salesRows[] = [];
+            $salesRows[] = ['Manual Daily Sales'];
+            $salesRows[] = ['Sales #', 'Date', 'Cash', 'GCash', 'Total Amount', 'Notes'];
+
+            foreach ($manualSales as $dailySale) {
+                $salesTotal += (float) $dailySale->amount;
+                $salesCashTotal += (float) $dailySale->cash_amount;
+                $salesGcashTotal += (float) $dailySale->gcash_amount;
+
+                $salesRows[] = [
+                    $dailySale->sale_number,
+                    $dailySale->sale_date->format('Y-m-d'),
+                    number_format((float) $dailySale->cash_amount, 2, '.', ''),
+                    number_format((float) $dailySale->gcash_amount, 2, '.', ''),
+                    number_format((float) $dailySale->amount, 2, '.', ''),
+                    $dailySale->notes,
+                ];
+            }
+
+            $salesRows[] = ['Sales total', '', '', '', '', '', '', '', number_format($salesCashTotal, 2, '.', ''), number_format($salesGcashTotal, 2, '.', ''), number_format($salesTotal, 2, '.', '')];
+            $worksheets['Sales Reports'] = $salesRows;
+        }
+
+        if (in_array('disbursement', $reportTypes, true)) {
+            $expenses = $this->disbursementExpenses()
+                ->filter(fn (array $expense) => $expense['export_date']->betweenIncluded($from, $to))
+                ->values();
+
+            $disbursementRows = [
+                ['Laba101 POS Export'],
+                ['Date from', $from->format('Y-m-d')],
+                ['Date to', $to->format('Y-m-d')],
+                [],
+                ['Disbursement Reports'],
+                ['Date', 'Disbursement #', 'Name', 'Category', 'Description', 'Amount'],
+            ];
+
+            foreach ($expenses as $expense) {
+                $disbursementTotal += (float) $expense['amount'];
+                $disbursementRows[] = [
+                    $expense['export_date']->format('Y-m-d'),
+                    $expense['disbursement_number'],
+                    $expense['name'],
+                    $expense['category'],
+                    $expense['description'],
+                    number_format((float) $expense['amount'], 2, '.', ''),
+                ];
+            }
+
+            $disbursementRows[] = ['Disbursement total', '', '', number_format($disbursementTotal, 2, '.', '')];
+            $worksheets['Disbursement Reports'] = $disbursementRows;
+        }
+
+        if (in_array('summary', $reportTypes, true)) {
+            if (! in_array('sales', $reportTypes, true)) {
+                $salesTotals = $this->salesTotalsBetween($from, $to);
+                $salesTotal = $salesTotals['total'];
+                $salesCashTotal = $salesTotals['cash'];
+                $salesGcashTotal = $salesTotals['gcash'];
+            }
+
+            if (! in_array('disbursement', $reportTypes, true)) {
+                $disbursementTotal = (float) $this->disbursementExpenses()
+                    ->filter(fn (array $expense) => $expense['export_date']->betweenIncluded($from, $to))
+                    ->sum('amount');
+            }
+
+            $worksheets['Summary'] = [
+                ['Laba101 POS Export'],
+                ['Date from', $from->format('Y-m-d')],
+                ['Date to', $to->format('Y-m-d')],
+                [],
+                ['Summary'],
+                ['Sales', number_format($salesTotal, 2, '.', '')],
+                ['Sales Cash', number_format($salesCashTotal, 2, '.', '')],
+                ['Sales GCash', number_format($salesGcashTotal, 2, '.', '')],
+                ['Disbursement', number_format($disbursementTotal, 2, '.', '')],
+                ['Sales - Disbursement', number_format($salesTotal - $disbursementTotal, 2, '.', '')],
+            ];
+        }
+
+        return $this->buildExcelWorkbook($worksheets);
     }
 
     public function staff(Request $request): View
@@ -480,7 +489,60 @@ class PageController extends Controller
 
     public function settings(): View
     {
-        return view('pages.settings');
+        return view('pages.settings', [
+            'user' => auth()->user(),
+        ]);
+    }
+
+    public function updateSettings(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'report_email' => ['required', 'string', 'email', 'max:255'],
+        ]);
+
+        $request->user()->update($validated);
+
+        return redirect()->route('settings.index')->with('status', 'Report email updated successfully.');
+    }
+
+    public function emailReport(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'date_scope' => ['required', 'in:today,week,month,custom'],
+            'date_from' => ['required_if:date_scope,custom', 'nullable', 'date'],
+            'date_to' => ['required_if:date_scope,custom', 'nullable', 'date', 'after_or_equal:date_from'],
+            'report_types' => ['required', 'array', 'min:1'],
+            'report_types.*' => ['in:sales,disbursement,summary'],
+        ]);
+
+        $reportEmail = $request->user()->report_email;
+
+        if (! $reportEmail) {
+            return back()->withErrors(['email' => 'Please set your report email in Settings first.']);
+        }
+
+        [$from, $to] = $this->reportDateRange(
+            $validated['date_scope'],
+            $validated['date_from'] ?? null,
+            $validated['date_to'] ?? null,
+        );
+
+        $reportTypes = $validated['report_types'];
+        $filename = 'laba101-reports-'.$from->format('Y-m-d').'-to-'.$to->format('Y-m-d').'.xls';
+
+        $fileContent = $this->generateReportContent($from, $to, $reportTypes);
+
+        Mail::to($reportEmail)->send(new ReportMail(
+            filename: $filename,
+            fileContent: $fileContent,
+            dateFrom: $from->format('Y-m-d'),
+            dateTo: $to->format('Y-m-d'),
+            reportTypes: $reportTypes,
+            senderName: $request->user()->name,
+            senderEmail: $request->user()->email,
+        ));
+
+        return back()->with('status', 'Report sent to ' . $reportEmail . ' successfully!');
     }
 
     public function placeholder(string $page): View
