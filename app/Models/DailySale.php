@@ -14,6 +14,8 @@ class DailySale extends Model
         'sale_number',
         'sale_date',
         'amount',
+        'cash_amount',
+        'gcash_amount',
         'notes',
         'branch',
     ];
@@ -23,6 +25,8 @@ class DailySale extends Model
         return [
             'sale_date' => 'date',
             'amount' => 'decimal:2',
+            'cash_amount' => 'decimal:2',
+            'gcash_amount' => 'decimal:2',
         ];
     }
 }

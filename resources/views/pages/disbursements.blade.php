@@ -91,8 +91,12 @@
                             <input type="date" name="sale_date" value="{{ old('sale_date', now()->toDateString()) }}" class="mt-1 md:mt-2 h-10 md:h-12 w-full rounded-xl md:rounded-2xl border border-[#c8d3ea] bg-white px-3 md:px-4 text-xs md:text-sm font-semibold text-[#061a42] outline-none focus:border-[#08285f]" required>
                         </label>
                         <label class="block">
-                            <span class="text-xs md:text-sm font-bold text-[#5c6a86]">Total sale</span>
-                            <input type="number" name="amount" value="{{ old('amount') }}" step="0.01" min="0" class="mt-1 md:mt-2 h-10 md:h-12 w-full rounded-xl md:rounded-2xl border border-[#c8d3ea] bg-white px-3 md:px-4 text-xs md:text-sm font-semibold text-[#061a42] outline-none focus:border-[#08285f]" placeholder="0.00" required>
+                            <span class="text-xs md:text-sm font-bold text-[#5c6a86]">Cash sales</span>
+                            <input type="number" name="cash_amount" value="{{ old('cash_amount') }}" step="0.01" min="0" class="mt-1 md:mt-2 h-10 md:h-12 w-full rounded-xl md:rounded-2xl border border-[#c8d3ea] bg-white px-3 md:px-4 text-xs md:text-sm font-semibold text-[#061a42] outline-none focus:border-[#08285f]" placeholder="0.00">
+                        </label>
+                        <label class="block">
+                            <span class="text-xs md:text-sm font-bold text-[#5c6a86]">GCash sales</span>
+                            <input type="number" name="gcash_amount" value="{{ old('gcash_amount') }}" step="0.01" min="0" class="mt-1 md:mt-2 h-10 md:h-12 w-full rounded-xl md:rounded-2xl border border-[#c8d3ea] bg-white px-3 md:px-4 text-xs md:text-sm font-semibold text-[#061a42] outline-none focus:border-[#08285f]" placeholder="0.00">
                         </label>
                         <label class="block">
                             <span class="text-xs md:text-sm font-bold text-[#5c6a86]">Notes</span>
@@ -106,18 +110,20 @@
                     <h3 class="text-base md:text-lg font-extrabold text-[#061a42]">Daily sales history</h3>
                     <div class="mt-4 md:mt-5 overflow-x-auto">
                         <table class="w-full min-w-[600px] md:min-w-[820px] text-left text-xs md:text-sm">
-                            <thead class="bg-[#061a42] text-white"><tr><th class="px-3 py-3 md:px-5 md:py-4">Sales #</th><th class="px-3 py-3 md:px-5 md:py-4">Date</th><th class="px-3 py-3 md:px-5 md:py-4 text-right">Total sale</th><th class="px-3 py-3 md:px-5 md:py-4">Notes</th><th class="px-3 py-3 md:px-5 md:py-4">Updated</th></tr></thead>
+                            <thead class="bg-[#061a42] text-white"><tr><th class="px-3 py-3 md:px-5 md:py-4">Sales #</th><th class="px-3 py-3 md:px-5 md:py-4">Date</th><th class="px-3 py-3 md:px-5 md:py-4 text-right">Cash</th><th class="px-3 py-3 md:px-5 md:py-4 text-right">GCash</th><th class="px-3 py-3 md:px-5 md:py-4 text-right">Total sale</th><th class="px-3 py-3 md:px-5 md:py-4">Notes</th><th class="px-3 py-3 md:px-5 md:py-4">Updated</th></tr></thead>
                             <tbody class="divide-y divide-[#d8e1f5]">
                                 @forelse ($dailySales as $sale)
                                     <tr>
                                         <td class="px-3 py-3 md:px-5 md:py-4 font-bold text-[#061a42]">{{ $sale->sale_number }}</td>
                                         <td class="px-3 py-3 md:px-5 md:py-4 font-bold text-[#061a42]">{{ $sale->sale_date->format('M d, Y') }}</td>
-                                        <td class="px-3 py-3 md:px-5 md:py-4 text-right font-bold">PHP {{ number_format((float) $sale->amount, 2) }}</td>
+                                        <td class="px-3 py-3 md:px-5 md:py-4 text-right">PHP {{ number_format((float) $sale->cash_amount, 2) }}</td>
+                                        <td class="px-3 py-3 md:px-5 md:py-4 text-right">PHP {{ number_format((float) $sale->gcash_amount, 2) }}</td>
+                                        <td class="px-3 py-3 md:px-5 md:py-4 text-right font-bold text-green-700">PHP {{ number_format((float) $sale->amount, 2) }}</td>
                                         <td class="px-3 py-3 md:px-5 md:py-4">{{ $sale->notes ?: '-' }}</td>
                                         <td class="px-3 py-3 md:px-5 md:py-4 text-[#5c6a86]">{{ $sale->updated_at->format('M d, Y h:i A') }}</td>
                                     </tr>
                                 @empty
-                                    <tr><td colspan="5" class="px-3 py-8 md:px-5 md:py-12 text-center text-[#5c6a86]">No daily sales totals yet.</td></tr>
+                                    <tr><td colspan="7" class="px-3 py-8 md:px-5 md:py-12 text-center text-[#5c6a86]">No daily sales totals yet.</td></tr>
                                 @endforelse
                             </tbody>
                         </table>

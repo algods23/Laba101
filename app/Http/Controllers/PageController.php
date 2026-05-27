@@ -115,14 +115,20 @@ class PageController extends Controller
     {
         $validated = $request->validate([
             'sale_date' => ['required', 'date'],
-            'amount' => ['required', 'numeric', 'min:0', 'max:99999999.99'],
+            'cash_amount' => ['nullable', 'numeric', 'min:0', 'max:99999999.99'],
+            'gcash_amount' => ['nullable', 'numeric', 'min:0', 'max:99999999.99'],
             'notes' => ['nullable', 'string', 'max:500'],
         ]);
+
+        $cash = (float) ($validated['cash_amount'] ?? 0);
+        $gcash = (float) ($validated['gcash_amount'] ?? 0);
 
         $dailySale = DailySale::query()->firstOrNew(['sale_date' => CarbonImmutable::parse($validated['sale_date'])->startOfDay()]);
         $dailySale->fill([
             'sale_number' => $dailySale->sale_number ?: $this->nextSaleNumber(),
-            'amount' => $validated['amount'],
+            'cash_amount' => $cash,
+            'gcash_amount' => $gcash,
+            'amount' => $cash + $gcash,
             'notes' => $validated['notes'] ?? null,
         ]);
         $dailySale->save();
@@ -306,13 +312,15 @@ class PageController extends Controller
 
                 $salesRows[] = [];
                 $salesRows[] = ['Manual Daily Sales'];
-                $salesRows[] = ['Sales #', 'Date', 'Amount', 'Notes'];
+                $salesRows[] = ['Sales #', 'Date', 'Cash', 'GCash', 'Total Amount', 'Notes'];
 
                 foreach ($manualSales as $dailySale) {
                     $salesTotal += (float) $dailySale->amount;
                     $salesRows[] = [
                         $dailySale->sale_number,
                         $dailySale->sale_date->format('Y-m-d'),
+                        number_format((float) $dailySale->cash_amount, 2, '.', ''),
+                        number_format((float) $dailySale->gcash_amount, 2, '.', ''),
                         number_format((float) $dailySale->amount, 2, '.', ''),
                         $dailySale->notes,
                     ];
