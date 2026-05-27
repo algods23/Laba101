@@ -18,6 +18,12 @@ Route::middleware('auth')->group(function () {
     Route::get('/export-reports', [PageController::class, 'exportReports'])->name('reports.export');
     Route::get('/inventory', [PageController::class, 'placeholder'])->defaults('page', 'inventory')->name('inventory.index');
 
+    Route::get('/maintenance', [PageController::class, 'maintenance'])->name('maintenance.index');
+    Route::post('/maintenance/subcleaning', [PageController::class, 'storeSubcleaning'])->name('subcleaning.store');
+    Route::post('/maintenance/machines', [PageController::class, 'storeMachine'])->name('machines.store');
+    Route::patch('/maintenance/machines/{machine}', [PageController::class, 'updateMachine'])->name('machines.update');
+    Route::delete('/maintenance/machines/{machine}', [PageController::class, 'destroyMachine'])->name('machines.destroy');
+
     Route::middleware('admin')->group(function () {
         Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
         Route::get('/pos-orders', [DashboardController::class, 'posOrders'])->name('pos.orders');

@@ -9,13 +9,14 @@
 
         
         ['label' => 'Inventory', 'route' => 'inventory.index', 'icon' => 'boxes'],
+        ['label' => 'Maintenance', 'route' => 'maintenance.index', 'icon' => 'wrench'],
         ['label' => 'Staff', 'route' => 'staff.index', 'icon' => 'badge'],
         ['label' => 'Settings', 'route' => 'settings.index', 'icon' => 'settings'],
     ];
 
     if (auth()->user()?->role === 'staff') {
         $items = collect($items)
-            ->whereIn('route', ['disbursements.index', 'reports.index', 'inventory.index', 'pos.orders'])
+            ->whereIn('route', ['disbursements.index', 'reports.index', 'inventory.index', 'maintenance.index', 'pos.orders'])
             ->values()
             ->all();
     }

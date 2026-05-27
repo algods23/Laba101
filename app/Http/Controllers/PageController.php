@@ -7,6 +7,8 @@ use App\Models\DisbursementExpense;
 use App\Models\ItemCategory;
 use App\Models\LaundryOrder;
 use App\Models\LaundryService;
+use App\Models\Machine;
+use App\Models\Subcleaning;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -127,6 +129,72 @@ class PageController extends Controller
         return redirect()
             ->route('disbursements.index', ['tab' => 'sales'])
             ->with('status', 'Daily sales total saved.');
+    }
+
+    public function maintenance(): View
+    {
+        return view('pages.maintenance', [
+            'machines' => Machine::query()->orderBy('machine_type')->orderBy('machine_name')->get(),
+            'subcleanings' => Subcleaning::query()->with('machines')->latest('date')->latest()->get(),
+        ]);
+    }
+
+    public function storeSubcleaning(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'date' => ['required', 'date'],
+            'machine_ids' => ['required', 'array', 'min:1'],
+            'machine_ids.*' => ['exists:machines,id'],
+            'cleaning_status' => ['required', 'string'],
+            'notes' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $subcleaning = Subcleaning::query()->create([
+            'date' => $validated['date'],
+            'cleaning_status' => $validated['cleaning_status'],
+            'notes' => $validated['notes'] ?? null,
+        ]);
+
+        $subcleaning->machines()->sync($validated['machine_ids']);
+
+        Machine::query()->whereIn('id', $validated['machine_ids'])->update([
+            'status' => $validated['cleaning_status'] === 'completed' ? 'available' : 'under_cleaning',
+        ]);
+
+        return redirect()->route('maintenance.index')->with('status', 'Subcleaning record saved.');
+    }
+
+    public function storeMachine(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'machine_name' => ['required', 'string', 'max:120'],
+            'machine_type' => ['required', 'in:washer,dryer'],
+            'status' => ['required', 'in:available,under_cleaning,maintenance'],
+        ]);
+
+        Machine::query()->create($validated);
+
+        return redirect()->route('maintenance.index')->with('status', 'Machine added.');
+    }
+
+    public function updateMachine(Request $request, Machine $machine): RedirectResponse
+    {
+        $validated = $request->validate([
+            'machine_name' => ['required', 'string', 'max:120'],
+            'machine_type' => ['required', 'in:washer,dryer'],
+            'status' => ['required', 'in:available,under_cleaning,maintenance'],
+        ]);
+
+        $machine->update($validated);
+
+        return redirect()->route('maintenance.index')->with('status', 'Machine updated.');
+    }
+
+    public function destroyMachine(Machine $machine): RedirectResponse
+    {
+        $machine->delete();
+
+        return redirect()->route('maintenance.index')->with('status', 'Machine deleted.');
     }
 
     public function reports(): View
