@@ -20,6 +20,7 @@ Route::middleware('auth')->group(function () {
 
     Route::get('/maintenance', [PageController::class, 'maintenance'])->name('maintenance.index');
     Route::post('/maintenance/subcleaning', [PageController::class, 'storeSubcleaning'])->name('subcleaning.store');
+    Route::patch('/maintenance/machines/{machine}/complete', [PageController::class, 'completeMachine'])->name('machines.complete');
     Route::post('/maintenance/machines', [PageController::class, 'storeMachine'])->name('machines.store');
     Route::patch('/maintenance/machines/{machine}', [PageController::class, 'updateMachine'])->name('machines.update');
     Route::delete('/maintenance/machines/{machine}', [PageController::class, 'destroyMachine'])->name('machines.destroy');

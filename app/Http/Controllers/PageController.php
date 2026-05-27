@@ -133,8 +133,32 @@ class PageController extends Controller
 
     public function maintenance(): View
     {
+        // Eager-load all subcleanings for each machine, then deduplicate on the PHP side:
+        // For each machine, group its subcleaning records by date. Within each date group,
+        // a 'completed' record supersedes any 'in_progress' rows. The result is one
+        // meaningful row per (machine, date) pair, sorted newest-first.
+        $machines = Machine::query()
+            ->with(['subcleanings' => function ($q) {
+                $q->orderBy('date', 'desc')->orderByRaw("CASE WHEN cleaning_status = 'completed' THEN 0 ELSE 1 END");
+            }])
+            ->orderBy('machine_type')
+            ->orderBy('machine_name')
+            ->get()
+            ->each(function ($machine) {
+                $machine->setRelation(
+                    'subcleanings',
+                    $machine->subcleanings
+                        ->groupBy(fn ($r) => $r->date->toDateString())
+                        ->map(fn ($group) =>
+                            $group->firstWhere('cleaning_status', 'completed') ?? $group->first()
+                        )
+                        ->sortByDesc(fn ($r) => $r->date->toDateString())
+                        ->values()
+                );
+            });
+
         return view('pages.maintenance', [
-            'machines' => Machine::query()->orderBy('machine_type')->orderBy('machine_name')->get(),
+            'machines' => $machines,
             'subcleanings' => Subcleaning::query()->with('machines')->latest('date')->latest()->get(),
         ]);
     }
@@ -162,6 +186,21 @@ class PageController extends Controller
         ]);
 
         return redirect()->route('maintenance.index')->with('status', 'Subcleaning record saved.');
+    }
+
+    public function completeMachine(Machine $machine): RedirectResponse
+    {
+        $machine->update(['status' => 'available']);
+
+        $subcleaning = Subcleaning::query()->create([
+            'date' => now()->toDateString(),
+            'cleaning_status' => 'completed',
+            'notes' => 'Finished cleaning via quick action',
+        ]);
+
+        $subcleaning->machines()->sync([$machine->id]);
+
+        return back()->with('status', $machine->machine_name . ' marked as completed.');
     }
 
     public function storeMachine(Request $request): RedirectResponse
