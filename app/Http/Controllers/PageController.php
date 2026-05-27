@@ -275,12 +275,14 @@ class PageController extends Controller
 
         return response()->streamDownload(function () use ($from, $to, $reportTypes) {
             $salesTotal = 0.0;
+            $salesCashTotal = 0.0;
+            $salesGcashTotal = 0.0;
             $disbursementTotal = 0.0;
             $worksheets = [];
 
             if (in_array('sales', $reportTypes, true)) {
                 $orders = LaundryOrder::query()
-                    ->with(['customer', 'service', 'itemCategory'])
+                    ->with(['customer', 'service', 'itemCategory', 'payments'])
                     ->whereBetween('created_at', [$from, $to])
                     ->oldest()
                     ->get();
@@ -292,11 +294,16 @@ class PageController extends Controller
                     ['Date to', $to->format('Y-m-d')],
                     [],
                     ['Sales Reports'],
-                    ['Date', 'Order No.', 'Customer', 'Service', 'Item Category', 'Status', 'Weight KG', 'Total Amount', 'Paid Amount', 'Balance'],
+                    ['Date', 'Order No.', 'Customer', 'Service', 'Item Category', 'Status', 'Weight KG', 'Total Amount', 'Cash Paid', 'GCash Paid', 'Paid Amount', 'Balance'],
                 ];
 
                 foreach ($orders as $order) {
+                    ['cash' => $cashPaid, 'gcash' => $gcashPaid] = $this->orderPaymentAmounts($order);
+
                     $salesTotal += (float) $order->paid_amount;
+                    $salesCashTotal += $cashPaid;
+                    $salesGcashTotal += $gcashPaid;
+
                     $salesRows[] = [
                         $order->created_at->format('Y-m-d h:i A'),
                         $order->order_number,
@@ -306,6 +313,8 @@ class PageController extends Controller
                         str($order->status)->headline(),
                         $order->weight_kg,
                         number_format((float) $order->total_amount, 2, '.', ''),
+                        number_format($cashPaid, 2, '.', ''),
+                        number_format($gcashPaid, 2, '.', ''),
                         number_format((float) $order->paid_amount, 2, '.', ''),
                         number_format($order->balance, 2, '.', ''),
                     ];
@@ -317,6 +326,9 @@ class PageController extends Controller
 
                 foreach ($manualSales as $dailySale) {
                     $salesTotal += (float) $dailySale->amount;
+                    $salesCashTotal += (float) $dailySale->cash_amount;
+                    $salesGcashTotal += (float) $dailySale->gcash_amount;
+
                     $salesRows[] = [
                         $dailySale->sale_number,
                         $dailySale->sale_date->format('Y-m-d'),
@@ -327,7 +339,7 @@ class PageController extends Controller
                     ];
                 }
 
-                $salesRows[] = ['Sales total', '', '', '', '', '', '', '', number_format($salesTotal, 2, '.', '')];
+                $salesRows[] = ['Sales total', '', '', '', '', '', '', '', number_format($salesCashTotal, 2, '.', ''), number_format($salesGcashTotal, 2, '.', ''), number_format($salesTotal, 2, '.', '')];
                 $worksheets['Sales Reports'] = $salesRows;
             }
 
@@ -363,7 +375,10 @@ class PageController extends Controller
 
             if (in_array('summary', $reportTypes, true)) {
                 if (! in_array('sales', $reportTypes, true)) {
-                    $salesTotal = $this->salesTotalBetween($from, $to);
+                    $salesTotals = $this->salesTotalsBetween($from, $to);
+                    $salesTotal = $salesTotals['total'];
+                    $salesCashTotal = $salesTotals['cash'];
+                    $salesGcashTotal = $salesTotals['gcash'];
                 }
 
                 if (! in_array('disbursement', $reportTypes, true)) {
@@ -379,6 +394,8 @@ class PageController extends Controller
                     [],
                     ['Summary'],
                     ['Sales', number_format($salesTotal, 2, '.', '')],
+                    ['Sales Cash', number_format($salesCashTotal, 2, '.', '')],
+                    ['Sales GCash', number_format($salesGcashTotal, 2, '.', '')],
                     ['Disbursement', number_format($disbursementTotal, 2, '.', '')],
                     ['Sales - Disbursement', number_format($salesTotal - $disbursementTotal, 2, '.', '')],
                 ];
@@ -584,12 +601,57 @@ class PageController extends Controller
 
     private function salesTotalBetween(CarbonImmutable $from, CarbonImmutable $to): float
     {
+        return $this->salesTotalsBetween($from, $to)['total'];
+    }
+
+    private function salesTotalsBetween(CarbonImmutable $from, CarbonImmutable $to): array
+    {
         $orderSales = (float) LaundryOrder::query()
             ->whereBetween('created_at', [$from, $to])
             ->sum('paid_amount');
-        $manualSales = (float) $this->dailySalesBetween($from, $to)->sum('amount');
+        $orders = LaundryOrder::query()
+            ->with('payments')
+            ->whereBetween('created_at', [$from, $to])
+            ->get();
 
-        return $orderSales + $manualSales;
+        $orderCash = 0.0;
+        $orderGcash = 0.0;
+
+        foreach ($orders as $order) {
+            ['cash' => $cashPaid, 'gcash' => $gcashPaid] = $this->orderPaymentAmounts($order);
+            $orderCash += $cashPaid;
+            $orderGcash += $gcashPaid;
+        }
+
+        $manualSalesRows = $this->dailySalesBetween($from, $to);
+        $manualSales = (float) $manualSalesRows->sum('amount');
+        $manualCash = (float) $manualSalesRows->sum('cash_amount');
+        $manualGcash = (float) $manualSalesRows->sum('gcash_amount');
+
+        return [
+            'cash' => $orderCash + $manualCash,
+            'gcash' => $orderGcash + $manualGcash,
+            'total' => $orderSales + $manualSales,
+        ];
+    }
+
+    private function orderPaymentAmounts(LaundryOrder $order): array
+    {
+        if ($order->payments->isEmpty()) {
+            return [
+                'cash' => (float) $order->paid_amount,
+                'gcash' => 0.0,
+            ];
+        }
+
+        return [
+            'cash' => (float) $order->payments
+                ->where('payment_method', 'cash')
+                ->sum('amount'),
+            'gcash' => (float) $order->payments
+                ->where('payment_method', 'gcash')
+                ->sum('amount'),
+        ];
     }
 
     private function dailySalesBetween(CarbonImmutable $from, CarbonImmutable $to)
@@ -740,7 +802,7 @@ XML;
             return 'Header';
         }
 
-        if (str_contains(strtolower($firstCell), 'total') || in_array($firstCell, ['Disbursement', 'Sales - Disbursement'], true)) {
+        if (str_contains(strtolower($firstCell), 'total') || in_array($firstCell, ['Sales Cash', 'Sales GCash', 'Disbursement', 'Sales - Disbursement'], true)) {
             return 'Total';
         }
 
