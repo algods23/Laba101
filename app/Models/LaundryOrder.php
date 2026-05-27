@@ -138,6 +138,32 @@ class LaundryOrder extends Model
         return 'received';
     }
 
+    public function nextWorkflowStep(): ?array
+    {
+        $completed = $this->workflow_completed ?? [];
+
+        foreach ($this->workflowSteps() as $step) {
+            if (! in_array($step['key'], $completed, true)) {
+                return $step;
+            }
+        }
+
+        return null;
+    }
+
+    public function actionLabelForStep(string $key): string
+    {
+        return match ($key) {
+            'received' => 'Mark received',
+            'wash' => 'Start washing',
+            'extras' => 'Apply extra services',
+            'dry' => 'Start drying',
+            'ready' => 'Ready for pickup',
+            'claimed' => 'Mark claimed',
+            default => 'Complete step',
+        };
+    }
+
     public static function normalizeWorkflowCompleted(array $stepKeys, array $completed): array
     {
         $completed = array_values(array_intersect($stepKeys, $completed));

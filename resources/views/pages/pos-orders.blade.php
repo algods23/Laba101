@@ -197,7 +197,7 @@
                 </div>
 
                 <div class="overflow-x-auto">
-                    <table class="w-full min-w-[820px] text-left text-sm">
+                    <table class="w-full min-w-[900px] text-left text-sm">
                         <thead class="bg-[#061a42] text-xs uppercase tracking-[0.08em] text-white">
                             <tr>
                                 <th class="px-5 py-4 font-bold">Ticket</th>
@@ -205,12 +205,13 @@
                                 <th class="px-5 py-4 font-bold">Service</th>
                                 <th class="px-5 py-4 font-bold">Due</th>
                                 <th class="px-5 py-4 font-bold">Balance</th>
-                                <th class="px-5 py-4 font-bold">Progress</th>
+                                <th class="px-5 py-4 font-bold">Action</th>
                             </tr>
                         </thead>
-                        <tbody class="divide-y divide-[#d8e1f5]">
+                        <tbody>
                             @forelse ($orders as $order)
-                                <tr class="align-top transition hover:bg-[#f8fbff]">
+                                @php $nextStep = $order->nextWorkflowStep(); @endphp
+                                <tr class="align-top border-t border-[#d8e1f5] transition hover:bg-[#f8fbff]">
                                     <td class="px-5 py-4">
                                         <p class="font-bold text-[#061a42]">{{ $order->order_number }}</p>
                                         <p class="mt-1 text-xs text-[#5c6a86]">{{ number_format($order->weight_kg, 2) }} kg</p>
@@ -232,12 +233,87 @@
                                         <p class="mt-1 text-xs text-[#5c6a86]">{{ $order->created_at->diffForHumans() }}</p>
                                     </td>
                                     <td class="px-5 py-4">
-                                        <p class="font-bold {{ $order->balance > 0 ? 'text-[#9b3d24]' : 'text-[#08285f]' }}">PHP {{ number_format($order->balance, 2) }}</p>
-                                            <p class="mt-1 text-xs text-[#5c6a86]">Extra PHP {{ number_format($order->additional_charge, 2) }}</p>
-                                            <p class="mt-1 text-xs text-[#5c6a86]">Paid PHP {{ number_format($order->paid_amount, 2) }}</p>
+                                        <div class="flex items-start justify-between gap-3">
+                                            <div>
+                                                <p class="font-bold {{ $order->balance > 0 ? 'text-[#9b3d24]' : 'text-[#08285f]' }}">PHP {{ number_format($order->balance, 2) }}</p>
+                                                <p class="mt-1 text-xs text-[#5c6a86]">Paid PHP {{ number_format($order->paid_amount, 2) }}</p>
+                                            </div>
+                                            @if ($order->balance > 0)
+                                                <span class="shrink-0 rounded-xl bg-[#fff1f0] px-3 py-2 text-xs font-bold text-[#9b3d24]">Unpaid</span>
+                                            @else
+                                                <span class="shrink-0 rounded-xl bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700">Paid</span>
+                                            @endif
+                                        </div>
                                     </td>
-                                    <td class="px-5 py-4">
-                                        <x-order-workflow :order="$order" />
+                                    <td class="px-5 py-4" x-data="{ showPayment: false }">
+                                        <div class="flex min-w-[220px] flex-col gap-2">
+                                            @if ($order->balance > 0)
+                                                <button
+                                                    type="button"
+                                                    x-on:click="showPayment = !showPayment"
+                                                    class="w-full rounded-2xl border border-[#08285f] bg-white px-4 py-2.5 text-xs font-bold text-[#08285f] transition hover:bg-[#f4f7ff]"
+                                                >
+                                                    Make a payment
+                                                </button>
+                                                <div
+                                                    x-show="showPayment"
+                                                    x-transition
+                                                    class="mt-2 rounded-2xl border border-[#c8d3ea] bg-[#f8fbff] p-3 text-xs text-[#061a42]"
+                                                >
+                                                    <form method="POST" action="{{ route('orders.pay', $order) }}" class="space-y-2">
+                                                        @csrf
+                                                        @method('PATCH')
+                                                        <div class="flex items-center gap-2">
+                                                            <label class="flex-1">
+                                                                <span class="block text-[10px] font-bold uppercase tracking-[0.12em] text-[#5c6a86]">Amount</span>
+                                                                <input
+                                                                    type="number"
+                                                                    name="amount"
+                                                                    step="0.01"
+                                                                    min="0.01"
+                                                                    max="{{ $order->balance }}"
+                                                                    value="{{ number_format($order->balance, 2, '.', '') }}"
+                                                                    class="mt-1 h-9 w-full rounded-xl border border-[#c8d3ea] bg-white px-3 text-xs font-semibold outline-none focus:border-[#08285f]"
+                                                                >
+                                                            </label>
+                                                        </div>
+                                                        <div class="flex items-center justify-end gap-2 pt-1">
+                                                            <button
+                                                                type="button"
+                                                                x-on:click="showPayment = false"
+                                                                class="rounded-xl border border-[#c8d3ea] px-3 py-1.5 text-[11px] font-bold text-[#5c6a86] hover:bg-white"
+                                                            >
+                                                                Cancel
+                                                            </button>
+                                                            <button
+                                                                type="submit"
+                                                                class="rounded-xl bg-[#061a42] px-4 py-1.5 text-[11px] font-bold text-white hover:bg-[#08285f]"
+                                                            >
+                                                                Confirm payment
+                                                            </button>
+                                                        </div>
+                                                    </form>
+                                                </div>
+                                            @endif
+
+                                            @if ($nextStep)
+                                                <form method="POST" action="{{ route('orders.advance', $order) }}">
+                                                    @csrf
+                                                    @method('PATCH')
+                                                    <button type="submit" class="w-full rounded-2xl bg-[#061a42] px-4 py-2.5 text-xs font-bold text-white transition hover:bg-[#08285f]">
+                                                        {{ $order->actionLabelForStep($nextStep['key']) }}
+                                                    </button>
+                                                </form>
+                                            @else
+                                                <span class="inline-flex justify-center rounded-2xl bg-emerald-50 px-4 py-2.5 text-xs font-bold text-emerald-700">All done</span>
+                                            @endif
+                                        </div>
+                                    </td>
+                                </tr>
+                                <tr class="border-b border-[#d8e1f5] bg-[#f8fbff]/80">
+                                    <td colspan="6" class="px-5 py-4">
+                                        <p class="mb-2 text-[10px] font-bold uppercase tracking-[0.1em] text-[#5c6a86]">Progress</p>
+                                        <x-order-workflow-horizontal :order="$order" />
                                     </td>
                                 </tr>
                             @empty
@@ -327,40 +403,6 @@
                 },
                 get indicatorPercent() {
                     return this.computed.allowedKg > 0 ? (Number(this.weightKg || 0) / this.computed.allowedKg) * 100 : 0;
-                },
-            };
-        }
-    </script>
-
-    <script>
-        function orderWorkflow(config) {
-            return {
-                steps: config.steps,
-                completed: [...config.completed],
-                toggle(key) {
-                    const keys = this.steps.map(step => step.key);
-                    const index = keys.indexOf(key);
-                    if (index === -1) return;
-
-                    if (this.completed.includes(key)) {
-                        this.completed = keys.slice(0, index);
-                    } else {
-                        this.completed = keys.slice(0, index + 1);
-                    }
-
-                    this.$nextTick(() => this.$refs.workflowForm.submit());
-                },
-                isDone(key) {
-                    return this.completed.includes(key);
-                },
-                isNext(key) {
-                    const keys = this.steps.map(step => step.key);
-                    const index = keys.indexOf(key);
-                    if (index === 0) return !this.completed.length;
-                    return !this.isDone(key) && this.isDone(keys[index - 1]);
-                },
-                canToggle(key) {
-                    return this.isDone(key) || this.isNext(key);
                 },
             };
         }

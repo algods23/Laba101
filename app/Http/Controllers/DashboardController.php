@@ -154,6 +154,45 @@ class DashboardController extends Controller
         return redirect()->route('pos.orders')->with('status', 'Order progress updated.');
     }
 
+    public function advanceWorkflow(LaundryOrder $order): RedirectResponse
+    {
+        $next = $order->nextWorkflowStep();
+
+        if (! $next) {
+            return redirect()->route('pos.orders')->with('status', 'All steps are already completed.');
+        }
+
+        $stepKeys = $order->workflowStepKeys();
+        $completed = array_merge($order->workflow_completed ?? [], [$next['key']]);
+        $completed = LaundryOrder::normalizeWorkflowCompleted($stepKeys, $completed);
+
+        $order->update([
+            'workflow_completed' => $completed,
+            'status' => $order->syncStatusFromWorkflow($completed),
+        ]);
+
+        return redirect()->route('pos.orders')->with('status', $order->actionLabelForStep($next['key']).' — done.');
+    }
+
+    public function recordPayment(Request $request, LaundryOrder $order): RedirectResponse
+    {
+        $validated = $request->validate([
+            'amount' => ['required', 'numeric', 'min:0.01'],
+        ]);
+
+        $amount = min((float) $order->balance, (float) $validated['amount']);
+
+        if ($amount <= 0 || $order->balance <= 0) {
+            return redirect()->route('pos.orders')->with('status', 'This order has no balance due.');
+        }
+
+        $order->update([
+            'paid_amount' => min((float) $order->total_amount, (float) $order->paid_amount + $amount),
+        ]);
+
+        return redirect()->route('pos.orders')->with('status', 'Payment of PHP '.number_format($amount, 2).' recorded.');
+    }
+
     private function nextOrderNumber(): string
     {
         $prefix = 'LB'.now()->format('ymd');
