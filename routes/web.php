@@ -31,6 +31,8 @@ Route::middleware('auth')->group(function () {
     Route::patch('/orders/{order}/status', [DashboardController::class, 'updateStatus'])->name('orders.status');
     Route::patch('/orders/{order}/advance', [DashboardController::class, 'advanceWorkflow'])->name('orders.advance');
     Route::patch('/orders/{order}/pay', [DashboardController::class, 'recordPayment'])->name('orders.pay');
+    Route::get('/orders/{order}/receipt', [DashboardController::class, 'orderReceipt'])->name('orders.receipt');
+    Route::get('/payments/{payment}/receipt', [DashboardController::class, 'paymentReceipt'])->name('payments.receipt');
 
     Route::middleware('admin')->group(function () {
         Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');

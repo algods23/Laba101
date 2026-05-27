@@ -5,8 +5,10 @@ namespace App\Http\Controllers;
 use App\Models\Customer;
 use App\Models\ItemCategory;
 use App\Models\LaundryOrder;
+use App\Models\LaundryPayment;
 use App\Models\LaundryService;
 use App\Services\LaundryPricingService;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -17,7 +19,7 @@ class DashboardController extends Controller
     public function index(): View
     {
         $orders = LaundryOrder::query()
-            ->with(['customer', 'service'])
+            ->with(['customer', 'service', 'payments'])
             ->latest()
             ->take(12)
             ->get();
@@ -50,7 +52,7 @@ class DashboardController extends Controller
     public function posOrders(): View
     {
         $orders = LaundryOrder::query()
-            ->with(['customer', 'service', 'itemCategory'])
+            ->with(['customer', 'service', 'itemCategory', 'payments'])
             ->latest()
             ->get();
 
@@ -101,6 +103,8 @@ class DashboardController extends Controller
             ->whereIn('id', $validated['extra_services'] ?? [])
             ->get();
         $pricing = $pricingService->calculate($service, $itemCategory, (float) $validated['weight_kg'], $addons);
+        $initialPayment = min((float) $pricing['total_price'], (float) ($validated['paid_amount'] ?? 0));
+
         if (empty($validated['customer_id'])) {
             $customer = Customer::query()->create([
                 'name' => $validated['customer_name'],
@@ -114,7 +118,7 @@ class DashboardController extends Controller
             ]);
         }
 
-        LaundryOrder::query()->create([
+        $order = LaundryOrder::query()->create([
             'order_number' => $this->nextOrderNumber(),
             'customer_id' => $customer->id,
             'service_id' => $service->id,
@@ -127,10 +131,19 @@ class DashboardController extends Controller
             'additional_charge' => $pricing['additional_charge'],
             'extra_service_amount' => $pricing['extra_service_amount'],
             'extra_services' => $pricing['extra_services'] ?: null,
-            'paid_amount' => $validated['paid_amount'] ?? 0,
+            'paid_amount' => $initialPayment,
             'due_at' => now()->addHours($service->turnaround_hours),
             'notes' => trim(($validated['notes'] ?? '').($pricing['warning'] ? "\n".$pricing['warning'] : '')) ?: null,
         ]);
+
+        if ($initialPayment > 0) {
+            $order->payments()->create([
+                'amount' => $initialPayment,
+                'payment_method' => 'cash',
+                'received_at' => now(),
+                'branch' => $order->branch,
+            ]);
+        }
 
         return redirect()->route('pos.orders')->with('status', $pricing['warning'] ?: 'Order added to the wash queue.');
     }
@@ -188,15 +201,41 @@ class DashboardController extends Controller
             return redirect()->route('pos.orders')->with('status', 'This order has no balance due.');
         }
 
-        $order->update([
-            'paid_amount' => min((float) $order->total_amount, (float) $order->paid_amount + $amount),
-            'payment_method' => $validated['payment_method'],
-            'payment_reference' => $validated['payment_method'] === 'gcash'
-                ? $validated['payment_reference']
-                : null,
-        ]);
+        DB::transaction(function () use ($order, $amount, $validated) {
+            $order->payments()->create([
+                'amount' => $amount,
+                'payment_method' => $validated['payment_method'],
+                'payment_reference' => $validated['payment_method'] === 'gcash'
+                    ? $validated['payment_reference']
+                    : null,
+                'received_at' => now(),
+                'branch' => $order->branch,
+            ]);
+
+            $order->update([
+                'paid_amount' => min((float) $order->total_amount, (float) $order->paid_amount + $amount),
+                'payment_method' => $validated['payment_method'],
+                'payment_reference' => $validated['payment_method'] === 'gcash'
+                    ? $validated['payment_reference']
+                    : null,
+            ]);
+        });
 
         return redirect()->route('pos.orders')->with('status', ucfirst($validated['payment_method']).' payment of PHP '.number_format($amount, 2).' recorded.');
+    }
+
+    public function orderReceipt(LaundryOrder $order): View
+    {
+        $order->load(['customer', 'service', 'itemCategory', 'payments']);
+
+        return view('receipts.payment', [
+            'order' => $order,
+        ]);
+    }
+
+    public function paymentReceipt(LaundryPayment $payment): RedirectResponse
+    {
+        return redirect()->route('orders.receipt', $payment->laundry_order_id);
     }
 
     private function nextOrderNumber(): string

@@ -237,13 +237,20 @@
                                             <div>
                                                 <p class="font-bold {{ $order->balance > 0 ? 'text-[#9b3d24]' : 'text-[#08285f]' }}">PHP {{ number_format($order->balance, 2) }}</p>
                                                 <p class="mt-1 text-xs text-[#5c6a86]">Paid PHP {{ number_format($order->paid_amount, 2) }}</p>
-                                                @if ($order->payment_method)
-                                                    <p class="mt-1 text-xs font-semibold text-[#5c6a86]">
-                                                        {{ strtoupper($order->payment_method) }}
-                                                        @if ($order->payment_reference)
-                                                            / Ref {{ $order->payment_reference }}
-                                                        @endif
-                                                    </p>
+                                                @if ($order->payments->isNotEmpty())
+                                                    <div class="mt-2 space-y-1">
+                                                        <a href="{{ route('orders.receipt', $order) }}" target="_blank" class="inline-flex rounded-lg bg-white px-2 py-1 text-[10px] font-extrabold leading-tight text-[#08285f] underline">
+                                                            Receipt
+                                                        </a>
+                                                        @foreach ($order->payments as $payment)
+                                                            <div class="rounded-xl bg-[#f4f7ff] px-2 py-1.5 text-[10px] font-bold leading-tight text-[#5c6a86]">
+                                                                <p>{{ strtoupper($payment->payment_method) }} PHP {{ number_format($payment->amount, 2) }}</p>
+                                                                @if ($payment->payment_reference)
+                                                                    <p class="mt-0.5">Ref {{ $payment->payment_reference }}</p>
+                                                                @endif
+                                                            </div>
+                                                        @endforeach
+                                                    </div>
                                                 @endif
                                             </div>
                                             @if ($order->balance > 0)

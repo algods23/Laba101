@@ -13,7 +13,7 @@
         <div class="flex min-w-0 items-center gap-3">
             <img src="{{ asset('laba101-logo.svg') }}" alt="Laba101" class="h-12 w-20 rounded-lg border-2 border-[#061a42] object-cover">
             <div class="hidden sm:block">
-                <p class="text-sm font-bold uppercase tracking-[0.16em] text-[#5c6a86]">Laba101 POS</p>
+                
                 <h1 class="truncate text-xl font-extrabold text-[#061a42]">{{ $title }}</h1>
             </div>
         </div>
