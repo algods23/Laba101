@@ -55,82 +55,118 @@
             </div>
         </div>
 
-        <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            @foreach ($services->where('service_type', 'order') as $service)
-                <article class="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-[0_18px_48px_rgba(6,26,66,.10)]">
-                    <div class="flex items-start justify-between gap-3">
-                        <div>
-                            <p class="text-xs font-bold uppercase tracking-[0.12em] text-[#5c6a86]">{{ $service->category }}</p>
-                            <h3 class="mt-2 text-lg font-extrabold text-[#061a42]">{{ $service->name }}</h3>
-                        </div>
-                        <span class="rounded-full px-3 py-1 text-xs font-bold {{ $service->is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600' }}">{{ $service->is_active ? 'Active' : 'Inactive' }}</span>
-                    </div>
-                    <p class="mt-4 text-3xl font-extrabold text-[#061a42]">PHP {{ number_format($service->price_per_kg, 2) }}</p>
-                    <div class="mt-4 grid grid-cols-2 gap-3 text-sm">
-                        <div class="rounded-2xl bg-[#f4f7ff] p-3">
-                            <p class="text-xs font-bold uppercase text-[#5c6a86]">Max KG</p>
-                            <p class="mt-1 font-extrabold text-[#061a42]">{{ number_format($service->max_kg, 2) }} kg</p>
-                        </div>
-                        <div class="rounded-2xl bg-[#f4f7ff] p-3">
-                            <p class="text-xs font-bold uppercase text-[#5c6a86]">Drying</p>
-                            <p class="mt-1 font-extrabold text-[#061a42]">{{ $service->drying_minutes ? $service->drying_minutes.' mins' : 'N/A' }}</p>
-                        </div>
-                    </div>
-                    @if ($service->includes)
-                        <p class="mt-4 text-xs font-semibold text-[#5c6a86]">Includes: {{ implode(', ', $service->includes) }}</p>
-                    @endif
-                    <button type="button" x-on:click="openServiceEdit({{ $service->id }})" class="mt-4 h-11 w-full rounded-2xl border border-[#c8d3ea] text-sm font-bold text-[#061a42] transition hover:border-[#08285f]">Edit</button>
-                </article>
-            @endforeach
-        </div>
+        <article class="rounded-3xl border border-white/70 bg-white/90 p-4 shadow-[0_18px_48px_rgba(6,26,66,.10)] md:p-5">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                    <h3 class="text-lg font-extrabold text-[#061a42] md:text-xl">Pricing Services</h3>
+                    <p class="mt-1 text-xs text-[#5c6a86] md:text-sm">Main laundry services used on POS orders.</p>
+                </div>
+            </div>
+            <div class="mt-4 overflow-hidden">
+                <table class="w-full table-fixed text-left text-[10px] md:text-xs xl:text-sm">
+                    <thead class="bg-[#061a42] text-white">
+                        <tr>
+                            <th class="w-[23%] rounded-l-2xl px-2 py-3 font-bold">Service</th>
+                            <th class="w-[14%] px-2 py-3 font-bold">Group</th>
+                            <th class="w-[13%] px-2 py-3 text-right font-bold">Price</th>
+                            <th class="w-[13%] px-2 py-3 font-bold">Load</th>
+                            <th class="w-[12%] px-2 py-3 font-bold">Dry</th>
+                            <th class="w-[12%] px-2 py-3 font-bold">Status</th>
+                            <th class="w-[13%] rounded-r-2xl px-2 py-3 text-right font-bold">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-[#d8e1f5]">
+                        @foreach ($services->where('service_type', 'order') as $service)
+                            <tr>
+                                <td class="break-words px-2 py-3">
+                                    <p class="font-extrabold text-[#061a42]">{{ $service->name }}</p>
+                                    @if ($service->includes)
+                                        <p class="mt-1 text-[10px] leading-tight text-[#5c6a86]">Includes: {{ implode(', ', $service->includes) }}</p>
+                                    @endif
+                                </td>
+                                <td class="break-words px-2 py-3 font-semibold text-[#5c6a86]">{{ $service->category }}</td>
+                                <td class="break-words px-2 py-3 text-right font-extrabold text-[#061a42]">PHP {{ number_format($service->price_per_kg, 2) }}</td>
+                                <td class="break-words px-2 py-3">{{ number_format($service->max_kg, 2) }} kg</td>
+                                <td class="break-words px-2 py-3">{{ $service->drying_minutes ? $service->drying_minutes.' mins' : 'N/A' }}</td>
+                                <td class="px-2 py-3">
+                                    <span class="inline-flex rounded-full px-2 py-1 text-[10px] font-bold {{ $service->is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600' }}">{{ $service->is_active ? 'Active' : 'Inactive' }}</span>
+                                </td>
+                                <td class="px-2 py-3 text-right">
+                                    <button type="button" x-on:click="openServiceEdit({{ $service->id }})" class="rounded-xl border border-[#c8d3ea] px-3 py-2 text-[10px] font-bold text-[#061a42] transition hover:border-[#08285f] md:text-xs">Edit</button>
+                                </td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+        </article>
 
         @php($addonServices = $services->where('service_type', 'addon'))
         @if ($addonServices->isNotEmpty())
-            <div>
-                <h3 class="text-xl font-extrabold text-[#061a42]">Extra add-on services</h3>
-                <p class="mt-1 text-sm text-[#5c6a86]">Optional extras staff can add on POS orders (Zonrox, Fabcon, etc.).</p>
-                <div class="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                    @foreach ($addonServices as $addon)
-                        <article class="rounded-3xl border border-dashed border-[#c8d3ea] bg-white/90 p-5 shadow-sm">
-                            <p class="text-xs font-bold uppercase tracking-[0.12em] text-[#5c6a86]">Add-on</p>
-                            <h3 class="mt-2 text-lg font-extrabold text-[#061a42]">{{ $addon->name }}</h3>
-                            <p class="mt-4 text-3xl font-extrabold text-[#061a42]">PHP {{ number_format($addon->price_per_kg, 2) }}</p>
-                            <p class="mt-2 text-sm text-[#5c6a86]">{{ $addon->description }}</p>
-                            <button type="button" x-on:click="openServiceEdit({{ $addon->id }})" class="mt-4 h-11 w-full rounded-2xl border border-[#c8d3ea] text-sm font-bold text-[#061a42] transition hover:border-[#08285f]">Edit</button>
-                        </article>
-                    @endforeach
+            <article class="rounded-3xl border border-white/70 bg-white/90 p-4 shadow-[0_18px_48px_rgba(6,26,66,.10)] md:p-5">
+                <h3 class="text-lg font-extrabold text-[#061a42] md:text-xl">Extra add-on services</h3>
+                <p class="mt-1 text-xs text-[#5c6a86] md:text-sm">Optional extras staff can add on POS orders.</p>
+                <div class="mt-4 overflow-hidden">
+                    <table class="w-full table-fixed text-left text-[10px] md:text-xs xl:text-sm">
+                        <thead class="bg-[#061a42] text-white">
+                            <tr>
+                                <th class="w-[25%] rounded-l-2xl px-2 py-3 font-bold">Add-on</th>
+                                <th class="w-[17%] px-2 py-3 text-right font-bold">Price</th>
+                                <th class="w-[31%] px-2 py-3 font-bold">Description</th>
+                                <th class="w-[14%] px-2 py-3 font-bold">Status</th>
+                                <th class="w-[13%] rounded-r-2xl px-2 py-3 text-right font-bold">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-[#d8e1f5]">
+                            @foreach ($addonServices as $addon)
+                                <tr>
+                                    <td class="break-words px-2 py-3 font-extrabold text-[#061a42]">{{ $addon->name }}</td>
+                                    <td class="break-words px-2 py-3 text-right font-extrabold text-[#061a42]">PHP {{ number_format($addon->price_per_kg, 2) }}</td>
+                                    <td class="break-words px-2 py-3 text-[#5c6a86]">{{ $addon->description ?: '-' }}</td>
+                                    <td class="px-2 py-3">
+                                        <span class="inline-flex rounded-full px-2 py-1 text-[10px] font-bold {{ $addon->is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600' }}">{{ $addon->is_active ? 'Active' : 'Inactive' }}</span>
+                                    </td>
+                                    <td class="px-2 py-3 text-right">
+                                        <button type="button" x-on:click="openServiceEdit({{ $addon->id }})" class="rounded-xl border border-[#c8d3ea] px-3 py-2 text-[10px] font-bold text-[#061a42] transition hover:border-[#08285f] md:text-xs">Edit</button>
+                                    </td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
                 </div>
-            </div>
+            </article>
         @endif
 
-        <div class="grid gap-6 xl:grid-cols-[1fr_380px]">
-            <article class="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-[0_18px_48px_rgba(6,26,66,.10)]">
+        <div>
+            <article class="rounded-3xl border border-white/70 bg-white/90 p-4 shadow-[0_18px_48px_rgba(6,26,66,.10)] md:p-5">
                 <div class="flex items-center justify-between gap-3">
                     <div>
-                        <h3 class="text-xl font-extrabold text-[#061a42]">Item categories</h3>
-                        <p class="mt-1 text-sm text-[#5c6a86]">Separate load limits for clothes, comforters, blankets, sheets, towels, and curtains.</p>
+                        <h3 class="text-lg font-extrabold text-[#061a42] md:text-xl">Item categories</h3>
+                        <p class="mt-1 text-xs text-[#5c6a86] md:text-sm">Separate load limits for clothes, comforters, blankets, sheets, towels, and curtains.</p>
                     </div>
                 </div>
-                <div class="mt-5 overflow-x-auto">
-                    <table class="w-full min-w-[680px] text-left text-sm">
+                <div class="mt-4 overflow-hidden">
+                    <table class="w-full table-fixed text-left text-[10px] md:text-xs xl:text-sm">
                         <thead class="bg-[#061a42] text-xs uppercase tracking-[0.08em] text-white">
                             <tr>
-                                <th class="rounded-l-2xl px-5 py-4">Category</th>
-                                <th class="px-5 py-4">Max KG</th>
-                                <th class="px-5 py-4">Extra fee / kg</th>
-                                <th class="px-5 py-4">Status</th>
-                                <th class="rounded-r-2xl px-5 py-4 text-right">Actions</th>
+                                <th class="w-[28%] rounded-l-2xl px-2 py-3">Category</th>
+                                <th class="w-[18%] px-2 py-3">Max KG</th>
+                                <th class="w-[22%] px-2 py-3">Extra fee / kg</th>
+                                <th class="w-[17%] px-2 py-3">Status</th>
+                                <th class="w-[15%] rounded-r-2xl px-2 py-3 text-right">Action</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-[#d8e1f5]">
                             @foreach ($itemCategories as $category)
                                 <tr>
-                                    <td class="px-5 py-4 font-bold text-[#061a42]">{{ $category->name }}</td>
-                                    <td class="px-5 py-4">{{ number_format($category->max_kg, 2) }} kg</td>
-                                    <td class="px-5 py-4">PHP {{ number_format($category->additional_fee, 2) }}</td>
-                                    <td class="px-5 py-4">{{ $category->is_active ? 'Active' : 'Inactive' }}</td>
-                                    <td class="px-5 py-4 text-right">
-                                        <button type="button" x-on:click="openCategoryEdit({{ $category->id }})" class="rounded-xl border border-[#c8d3ea] px-4 py-2 font-bold text-[#061a42] transition hover:border-[#08285f]">Edit</button>
+                                    <td class="break-words px-2 py-3 font-bold text-[#061a42]">{{ $category->name }}</td>
+                                    <td class="break-words px-2 py-3">{{ number_format($category->max_kg, 2) }} kg</td>
+                                    <td class="break-words px-2 py-3">PHP {{ number_format($category->additional_fee, 2) }}</td>
+                                    <td class="px-2 py-3">
+                                        <span class="inline-flex rounded-full px-2 py-1 text-[10px] font-bold {{ $category->is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600' }}">{{ $category->is_active ? 'Active' : 'Inactive' }}</span>
+                                    </td>
+                                    <td class="px-2 py-3 text-right">
+                                        <button type="button" x-on:click="openCategoryEdit({{ $category->id }})" class="rounded-xl border border-[#c8d3ea] px-3 py-2 text-[10px] font-bold text-[#061a42] transition hover:border-[#08285f] md:text-xs">Edit</button>
                                     </td>
                                 </tr>
                             @endforeach
@@ -139,26 +175,7 @@
                 </div>
             </article>
 
-            <article class="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-[0_18px_48px_rgba(6,26,66,.10)]">
-                <h3 class="text-xl font-extrabold text-[#061a42]">Price calculator</h3>
-                <div class="mt-5 space-y-4">
-                    <select x-model.number="calculator.serviceId" class="h-12 w-full rounded-2xl border border-[#c8d3ea] bg-white px-4 text-sm font-semibold outline-none">
-                        <template x-for="service in activeServices" :key="service.id"><option :value="service.id" x-text="service.name"></option></template>
-                    </select>
-                    <select x-model.number="calculator.categoryId" class="h-12 w-full rounded-2xl border border-[#c8d3ea] bg-white px-4 text-sm font-semibold outline-none">
-                        <template x-for="category in activeCategories" :key="category.id"><option :value="category.id" x-text="category.name"></option></template>
-                    </select>
-                    <input type="number" step="0.01" min="0.25" x-model.number="calculator.weight" class="h-12 w-full rounded-2xl border border-[#c8d3ea] px-4 text-sm font-semibold outline-none" placeholder="Total weight kg">
-                    <div class="rounded-2xl bg-[#f4f7ff] p-4 text-sm">
-                        <p class="font-bold text-[#061a42]" x-text="computed.categoryLabel"></p>
-                        <p class="mt-2 text-[#5c6a86]" x-text="'Base service: PHP ' + computed.servicePrice.toFixed(2)"></p>
-                        <p class="text-[#5c6a86]" x-show="computed.additionalCharge > 0" x-text="'Overweight fee: PHP ' + computed.additionalCharge.toFixed(2)"></p>
-                        <p class="mt-3 text-xl font-extrabold text-[#061a42]" x-text="'Total: PHP ' + computed.total.toFixed(2)"></p>
-                        <p x-show="computed.warning" x-text="computed.warning" class="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs font-bold text-red-700"></p>
-                    </div>
-                </div>
-            </article>
-        </div>
+       
 
         <div x-cloak x-show="serviceModalOpen" x-transition.opacity class="fixed inset-0 z-50 flex items-center justify-center bg-[#031336]/65 p-4 backdrop-blur-sm">
             <form method="POST" x-bind:action="serviceForm.id ? serviceBaseUrl + '/' + serviceForm.id : serviceStoreUrl" class="w-full max-w-2xl rounded-3xl bg-white p-6 shadow-2xl">
