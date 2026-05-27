@@ -12,6 +12,8 @@ Route::middleware('guest')->group(function () {
 
 Route::middleware('auth')->group(function () {
     Route::get('/disbursements', [PageController::class, 'disbursements'])->name('disbursements.index');
+    Route::post('/disbursement-expenses', [PageController::class, 'storeDisbursementExpense'])->name('disbursement-expenses.store');
+    Route::post('/daily-sales', [PageController::class, 'storeDailySale'])->name('daily-sales.store');
     Route::get('/reports', [PageController::class, 'reports'])->name('reports.index');
     Route::get('/export-reports', [PageController::class, 'exportReports'])->name('reports.export');
     Route::get('/inventory', [PageController::class, 'placeholder'])->defaults('page', 'inventory')->name('inventory.index');

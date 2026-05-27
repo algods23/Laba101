@@ -47,8 +47,8 @@
             @endforeach
         </div>
 
-        <div class="grid gap-6 xl:grid-cols-[380px_1fr]">
-            <article class="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-[0_18px_48px_rgba(6,26,66,.10)] backdrop-blur">
+        <div class="grid gap-6 lg:grid-cols-12">
+            <article class="lg:col-span-5 xl:col-span-4 rounded-3xl border border-white/70 bg-white/90 p-5 shadow-[0_18px_48px_rgba(6,26,66,.10)] backdrop-blur">
                 <h2 class="text-lg font-extrabold text-[#061a42]">New order</h2>
                 <p class="mt-1 text-sm text-[#5c6a86]">Create a laundry ticket for the queue.</p>
 
@@ -65,7 +65,7 @@
                         </select>
                     </label>
 
-                    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
+                    <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
                         <label class="block">
                             <span class="text-xs font-bold uppercase tracking-[0.08em] text-[#5c6a86]">Customer name</span>
                             <input name="customer_name" value="{{ old('customer_name') }}" class="mt-2 h-12 w-full rounded-2xl border border-[#c8d3ea] bg-white px-4 text-sm font-semibold text-[#061a42] outline-none focus:border-[#08285f]" placeholder="Walk-in name">
@@ -129,7 +129,7 @@
                 </form>
             </article>
 
-            <article class="rounded-3xl border border-white/70 bg-white/90 shadow-[0_18px_48px_rgba(6,26,66,.10)] backdrop-blur">
+            <article class="lg:col-span-7 xl:col-span-8 rounded-3xl border border-white/70 bg-white/90 shadow-[0_18px_48px_rgba(6,26,66,.10)] backdrop-blur">
                 <div class="flex flex-col gap-3 border-b border-[#d8e1f5] p-5 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                         <h2 class="text-lg font-extrabold text-[#061a42]">Order queue</h2>

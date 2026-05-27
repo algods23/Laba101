@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\DailySale;
+use App\Models\DisbursementExpense;
 use App\Models\ItemCategory;
 use App\Models\LaundryOrder;
 use App\Models\LaundryService;
@@ -66,12 +68,65 @@ class PageController extends Controller
     public function disbursements(): View
     {
         $expenses = $this->disbursementExpenses();
+        $dailySales = DailySale::query()->latest('sale_date')->take(20)->get();
 
         return view('pages.disbursements', [
             'expenses' => $expenses,
-            'dailyTotal' => $expenses->where('date', now()->format('M d, Y'))->sum('amount'),
-            'monthlyTotal' => $expenses->sum('amount'),
+            'nextDisbursementNumber' => $this->nextDisbursementNumber(),
+            'nextSaleNumber' => $this->nextSaleNumber(),
+            'dailyTotal' => $expenses
+                ->filter(fn (array $expense) => $expense['export_date']->isSameDay(now()))
+                ->sum('amount'),
+            'monthlyTotal' => $expenses
+                ->filter(fn (array $expense) => $expense['export_date']->betweenIncluded(now()->startOfMonth(), now()->endOfMonth()))
+                ->sum('amount'),
+            'dailySales' => $dailySales,
+            'todaysManualSales' => DailySale::query()->whereDate('sale_date', now()->toDateString())->sum('amount'),
+            'monthlyManualSales' => DailySale::query()
+                ->whereBetween('sale_date', [now()->startOfMonth()->toDateString(), now()->endOfMonth()->toDateString()])
+                ->sum('amount'),
         ]);
+    }
+
+    public function storeDisbursementExpense(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'expense_date' => ['required', 'date'],
+            'name' => ['required', 'string', 'max:120'],
+            'category' => ['required', 'string', 'max:120'],
+            'description' => ['nullable', 'string', 'max:500'],
+            'amount' => ['required', 'numeric', 'min:0', 'max:99999999.99'],
+        ]);
+
+        DisbursementExpense::query()->create([
+            ...$validated,
+            'disbursement_number' => $this->nextDisbursementNumber(),
+        ]);
+
+        return redirect()
+            ->route('disbursements.index', ['tab' => 'expenses'])
+            ->with('status', 'Disbursement saved.');
+    }
+
+    public function storeDailySale(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'sale_date' => ['required', 'date'],
+            'amount' => ['required', 'numeric', 'min:0', 'max:99999999.99'],
+            'notes' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $dailySale = DailySale::query()->firstOrNew(['sale_date' => CarbonImmutable::parse($validated['sale_date'])->startOfDay()]);
+        $dailySale->fill([
+            'sale_number' => $dailySale->sale_number ?: $this->nextSaleNumber(),
+            'amount' => $validated['amount'],
+            'notes' => $validated['notes'] ?? null,
+        ]);
+        $dailySale->save();
+
+        return redirect()
+            ->route('disbursements.index', ['tab' => 'sales'])
+            ->with('status', 'Daily sales total saved.');
     }
 
     public function reports(): View
@@ -114,6 +169,7 @@ class PageController extends Controller
                     ->whereBetween('created_at', [$from, $to])
                     ->oldest()
                     ->get();
+                $manualSales = $this->dailySalesBetween($from, $to);
 
                 $salesRows = [
                     ['Laba101 POS Export'],
@@ -140,6 +196,20 @@ class PageController extends Controller
                     ];
                 }
 
+                $salesRows[] = [];
+                $salesRows[] = ['Manual Daily Sales'];
+                $salesRows[] = ['Sales #', 'Date', 'Amount', 'Notes'];
+
+                foreach ($manualSales as $dailySale) {
+                    $salesTotal += (float) $dailySale->amount;
+                    $salesRows[] = [
+                        $dailySale->sale_number,
+                        $dailySale->sale_date->format('Y-m-d'),
+                        number_format((float) $dailySale->amount, 2, '.', ''),
+                        $dailySale->notes,
+                    ];
+                }
+
                 $salesRows[] = ['Sales total', '', '', '', '', '', '', '', number_format($salesTotal, 2, '.', '')];
                 $worksheets['Sales Reports'] = $salesRows;
             }
@@ -155,13 +225,15 @@ class PageController extends Controller
                     ['Date to', $to->format('Y-m-d')],
                     [],
                     ['Disbursement Reports'],
-                    ['Date', 'Category', 'Description', 'Amount'],
+                    ['Date', 'Disbursement #', 'Name', 'Category', 'Description', 'Amount'],
                 ];
 
                 foreach ($expenses as $expense) {
                     $disbursementTotal += (float) $expense['amount'];
                     $disbursementRows[] = [
                         $expense['export_date']->format('Y-m-d'),
+                        $expense['disbursement_number'],
+                        $expense['name'],
                         $expense['category'],
                         $expense['description'],
                         number_format((float) $expense['amount'], 2, '.', ''),
@@ -174,9 +246,7 @@ class PageController extends Controller
 
             if (in_array('summary', $reportTypes, true)) {
                 if (! in_array('sales', $reportTypes, true)) {
-                    $salesTotal = (float) LaundryOrder::query()
-                        ->whereBetween('created_at', [$from, $to])
-                        ->sum('paid_amount');
+                    $salesTotal = $this->salesTotalBetween($from, $to);
                 }
 
                 if (! in_array('disbursement', $reportTypes, true)) {
@@ -298,14 +368,47 @@ class PageController extends Controller
 
     private function disbursementExpenses()
     {
-        return collect([
-            ['export_date' => CarbonImmutable::today(), 'category' => 'Staff payout', 'description' => 'Washer shift payout', 'amount' => 1250],
-            ['export_date' => CarbonImmutable::today()->subDay(), 'category' => 'Supplies', 'description' => 'Detergent and softener refill', 'amount' => 2180],
-            ['export_date' => CarbonImmutable::today()->subDays(2), 'category' => 'Utilities', 'description' => 'Water bill partial payment', 'amount' => 3450],
-        ])->map(fn (array $expense) => [
-            ...$expense,
-            'date' => $expense['export_date']->format('M d, Y'),
-        ]);
+        return DisbursementExpense::query()
+            ->latest('expense_date')
+            ->latest()
+            ->get()
+            ->map(fn (DisbursementExpense $expense) => [
+                'export_date' => CarbonImmutable::parse($expense->expense_date),
+                'date' => $expense->expense_date->format('M d, Y'),
+                'disbursement_number' => $expense->disbursement_number,
+                'name' => $expense->name,
+                'category' => $expense->category,
+                'description' => $expense->description,
+                'amount' => (float) $expense->amount,
+            ]);
+    }
+
+    private function nextDisbursementNumber(): string
+    {
+        return 'DISB-'.str_pad((string) (DisbursementExpense::query()->count() + 1), 2, '0', STR_PAD_LEFT);
+    }
+
+    private function nextSaleNumber(): string
+    {
+        return 'SALE-'.str_pad((string) (DailySale::query()->count() + 1), 2, '0', STR_PAD_LEFT);
+    }
+
+    private function salesTotalBetween(CarbonImmutable $from, CarbonImmutable $to): float
+    {
+        $orderSales = (float) LaundryOrder::query()
+            ->whereBetween('created_at', [$from, $to])
+            ->sum('paid_amount');
+        $manualSales = (float) $this->dailySalesBetween($from, $to)->sum('amount');
+
+        return $orderSales + $manualSales;
+    }
+
+    private function dailySalesBetween(CarbonImmutable $from, CarbonImmutable $to)
+    {
+        return DailySale::query()
+            ->whereBetween('sale_date', [$from->toDateString(), $to->toDateString()])
+            ->oldest('sale_date')
+            ->get();
     }
 
     private function buildExcelWorkbook(array $worksheets): string
@@ -317,17 +420,88 @@ class PageController extends Controller
  xmlns:o="urn:schemas-microsoft-com:office:office"
  xmlns:x="urn:schemas-microsoft-com:office:excel"
  xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+<Styles>
+ <Style ss:ID="Default" ss:Name="Normal">
+  <Alignment ss:Vertical="Center"/>
+  <Font ss:FontName="Arial" ss:Size="10"/>
+ </Style>
+ <Style ss:ID="Title">
+  <Font ss:FontName="Arial" ss:Size="16" ss:Bold="1" ss:Color="#061A42"/>
+  <Alignment ss:Vertical="Center"/>
+ </Style>
+ <Style ss:ID="MetaLabel">
+  <Font ss:FontName="Arial" ss:Size="10" ss:Bold="1" ss:Color="#5C6A86"/>
+  <Alignment ss:Vertical="Center"/>
+ </Style>
+ <Style ss:ID="MetaValue">
+  <Font ss:FontName="Arial" ss:Size="10" ss:Bold="1"/>
+  <Alignment ss:Vertical="Center"/>
+ </Style>
+ <Style ss:ID="Section">
+  <Font ss:FontName="Arial" ss:Size="12" ss:Bold="1" ss:Color="#061A42"/>
+  <Interior ss:Color="#EAF1FF" ss:Pattern="Solid"/>
+  <Alignment ss:Vertical="Center"/>
+  <Borders>
+   <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#C8D3EA"/>
+  </Borders>
+ </Style>
+ <Style ss:ID="Header">
+  <Font ss:FontName="Arial" ss:Size="10" ss:Bold="1" ss:Color="#FFFFFF"/>
+  <Interior ss:Color="#061A42" ss:Pattern="Solid"/>
+  <Alignment ss:Vertical="Center" ss:WrapText="1"/>
+  <Borders>
+   <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#061A42"/>
+   <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#061A42"/>
+   <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#061A42"/>
+   <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#061A42"/>
+  </Borders>
+ </Style>
+ <Style ss:ID="Cell">
+  <Alignment ss:Vertical="Center" ss:WrapText="1"/>
+  <Borders>
+   <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D8E1F5"/>
+   <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D8E1F5"/>
+   <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D8E1F5"/>
+   <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D8E1F5"/>
+  </Borders>
+ </Style>
+ <Style ss:ID="Money">
+  <Alignment ss:Vertical="Center"/>
+  <NumberFormat ss:Format="&quot;PHP&quot; #,##0.00"/>
+  <Borders>
+   <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D8E1F5"/>
+   <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D8E1F5"/>
+   <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D8E1F5"/>
+   <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D8E1F5"/>
+  </Borders>
+ </Style>
+ <Style ss:ID="Total">
+  <Font ss:FontName="Arial" ss:Size="10" ss:Bold="1" ss:Color="#061A42"/>
+  <Interior ss:Color="#F8FBFF" ss:Pattern="Solid"/>
+  <Alignment ss:Vertical="Center"/>
+  <Borders>
+   <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#C8D3EA"/>
+   <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#C8D3EA"/>
+   <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#C8D3EA"/>
+   <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#C8D3EA"/>
+  </Borders>
+ </Style>
+</Styles>
 XML;
 
         foreach ($worksheets as $name => $rows) {
             $xml .= '<Worksheet ss:Name="'.$this->escapeExcelXml($name).'"><Table>';
+            $xml .= $this->excelColumns();
 
             foreach ($rows as $row) {
-                $xml .= '<Row>';
+                $rowStyle = $this->excelRowStyle($row);
+                $height = $rowStyle === 'Title' ? 28 : ($rowStyle === 'Section' ? 24 : 22);
+                $xml .= '<Row ss:Height="'.$height.'">';
 
                 foreach ($row as $value) {
                     $type = is_numeric($value) && $value !== '' ? 'Number' : 'String';
-                    $xml .= '<Cell><Data ss:Type="'.$type.'">'.$this->escapeExcelXml((string) $value).'</Data></Cell>';
+                    $cellStyle = $this->excelCellStyle($rowStyle, $value);
+                    $xml .= '<Cell ss:StyleID="'.$cellStyle.'"><Data ss:Type="'.$type.'">'.$this->escapeExcelXml((string) $value).'</Data></Cell>';
                 }
 
                 $xml .= '</Row>';
@@ -342,5 +516,54 @@ XML;
     private function escapeExcelXml(string $value): string
     {
         return htmlspecialchars($value, ENT_QUOTES | ENT_XML1, 'UTF-8');
+    }
+
+    private function excelColumns(): string
+    {
+        $widths = [125, 115, 150, 135, 135, 100, 95, 110, 110, 110, 135, 135];
+
+        return collect($widths)
+            ->map(fn (int $width) => '<Column ss:Width="'.$width.'"/>')
+            ->implode('');
+    }
+
+    private function excelRowStyle(array $row): string
+    {
+        if ($row === []) {
+            return 'Default';
+        }
+
+        $firstCell = (string) ($row[0] ?? '');
+
+        if ($firstCell === 'Laba101 POS Export') {
+            return 'Title';
+        }
+
+        if (in_array($firstCell, ['Date from', 'Date to'], true)) {
+            return 'MetaLabel';
+        }
+
+        if (in_array($firstCell, ['Sales Reports', 'Manual Daily Sales', 'Disbursement Reports', 'Summary'], true)) {
+            return 'Section';
+        }
+
+        if (in_array($firstCell, ['Date', 'Sales #'], true)) {
+            return 'Header';
+        }
+
+        if (str_contains(strtolower($firstCell), 'total') || in_array($firstCell, ['Disbursement', 'Sales - Disbursement'], true)) {
+            return 'Total';
+        }
+
+        return 'Cell';
+    }
+
+    private function excelCellStyle(string $rowStyle, mixed $value): string
+    {
+        if ($rowStyle === 'MetaLabel' && $value !== 'Date from' && $value !== 'Date to') {
+            return 'MetaValue';
+        }
+
+        return $rowStyle;
     }
 }

@@ -149,23 +149,48 @@
                     <button type="button" x-on:click="serviceModalOpen = false" class="rounded-xl border border-[#c8d3ea] px-3 py-2 text-sm font-bold text-[#061a42]">Close</button>
                 </div>
                 <div class="mt-6 grid gap-4 sm:grid-cols-2">
-                    <input name="name" x-model="serviceForm.name" required class="h-12 rounded-2xl border border-[#c8d3ea] px-4 outline-none" placeholder="Service name">
-                    <select name="category" x-model="serviceForm.category" required class="h-12 rounded-2xl border border-[#c8d3ea] bg-white px-4 outline-none">
-                        <option>Self Service</option>
-                        <option>Drop-Off</option>
-                        <option>Full Service</option>
-                        <option>Dry Only</option>
-                    </select>
-                    <input type="number" step="0.01" min="0" name="price_per_kg" x-model="serviceForm.price_per_kg" required class="h-12 rounded-2xl border border-[#c8d3ea] px-4 outline-none" placeholder="Base price">
-                    <input type="number" step="0.01" min="0.25" name="max_kg" x-model="serviceForm.max_kg" required class="h-12 rounded-2xl border border-[#c8d3ea] px-4 outline-none" placeholder="Max KG per load">
-                    <input type="number" min="1" name="drying_minutes" x-model="serviceForm.drying_minutes" class="h-12 rounded-2xl border border-[#c8d3ea] px-4 outline-none" placeholder="Drying minutes">
-                    <input type="number" step="0.01" min="0" name="additional_charge" x-model="serviceForm.additional_charge" class="h-12 rounded-2xl border border-[#c8d3ea] px-4 outline-none" placeholder="Additional charge / extra kg">
-                    <input type="number" min="1" name="turnaround_hours" x-model="serviceForm.turnaround_hours" required class="h-12 rounded-2xl border border-[#c8d3ea] px-4 outline-none" placeholder="Turnaround hours">
-                    <select name="is_active" x-model="serviceForm.is_active" class="h-12 rounded-2xl border border-[#c8d3ea] bg-white px-4 outline-none">
-                        <option value="1">Active</option>
-                        <option value="0">Inactive</option>
-                    </select>
+                    <label class="block">
+                        <span class="text-sm font-bold text-[#5c6a86]">Service name</span>
+                        <input name="name" x-model="serviceForm.name" required class="mt-2 h-12 w-full rounded-2xl border border-[#c8d3ea] px-4 outline-none focus:border-[#08285f]" placeholder="Service name">
+                    </label>
+                    <label class="block">
+                        <span class="text-sm font-bold text-[#5c6a86]">Service type</span>
+                        <select name="category" x-model="serviceForm.category" required class="mt-2 h-12 w-full rounded-2xl border border-[#c8d3ea] bg-white px-4 outline-none focus:border-[#08285f]">
+                            <option>Self Service</option>
+                            <option>Drop-Off</option>
+                            <option>Full Service</option>
+                            <option>Dry Only</option>
+                        </select>
+                    </label>
+                    <label class="block">
+                        <span class="text-sm font-bold text-[#5c6a86]">Base price</span>
+                        <input type="number" step="0.01" min="0" name="price_per_kg" x-model="serviceForm.price_per_kg" required class="mt-2 h-12 w-full rounded-2xl border border-[#c8d3ea] px-4 outline-none focus:border-[#08285f]" placeholder="0.00">
+                    </label>
+                    <label class="block">
+                        <span class="text-sm font-bold text-[#5c6a86]">Max KG per load</span>
+                        <input type="number" step="0.01" min="0.25" name="max_kg" x-model="serviceForm.max_kg" required class="mt-2 h-12 w-full rounded-2xl border border-[#c8d3ea] px-4 outline-none focus:border-[#08285f]" placeholder="0.00">
+                    </label>
+                    <label class="block">
+                        <span class="text-sm font-bold text-[#5c6a86]">Drying minutes</span>
+                        <input type="number" min="1" name="drying_minutes" x-model="serviceForm.drying_minutes" class="mt-2 h-12 w-full rounded-2xl border border-[#c8d3ea] px-4 outline-none focus:border-[#08285f]" placeholder="Optional">
+                    </label>
+                    <label class="block">
+                        <span class="text-sm font-bold text-[#5c6a86]">Additional charge per extra KG</span>
+                        <input type="number" step="0.01" min="0" name="additional_charge" x-model="serviceForm.additional_charge" class="mt-2 h-12 w-full rounded-2xl border border-[#c8d3ea] px-4 outline-none focus:border-[#08285f]" placeholder="0.00">
+                    </label>
+                    <label class="block">
+                        <span class="text-sm font-bold text-[#5c6a86]">Turnaround hours</span>
+                        <input type="number" min="1" name="turnaround_hours" x-model="serviceForm.turnaround_hours" required class="mt-2 h-12 w-full rounded-2xl border border-[#c8d3ea] px-4 outline-none focus:border-[#08285f]" placeholder="24">
+                    </label>
+                    <label class="block">
+                        <span class="text-sm font-bold text-[#5c6a86]">Status</span>
+                        <select name="is_active" x-model="serviceForm.is_active" class="mt-2 h-12 w-full rounded-2xl border border-[#c8d3ea] bg-white px-4 outline-none focus:border-[#08285f]">
+                            <option value="1">Active</option>
+                            <option value="0">Inactive</option>
+                        </select>
+                    </label>
                     <div class="sm:col-span-2 grid gap-2 sm:grid-cols-5">
+                        <p class="sm:col-span-5 text-sm font-bold text-[#5c6a86]">Includes</p>
                         @foreach (['Wash', 'Dry', 'Fold', 'Detergent', 'Fabcon'] as $include)
                             <label class="flex items-center gap-2 rounded-2xl border border-[#c8d3ea] px-3 py-3 text-sm font-semibold">
                                 <input type="checkbox" name="includes[]" value="{{ $include }}" x-bind:checked="serviceForm.includes.includes('{{ $include }}')">
@@ -173,7 +198,10 @@
                             </label>
                         @endforeach
                     </div>
-                    <textarea name="description" x-model="serviceForm.description" class="min-h-24 rounded-2xl border border-[#c8d3ea] px-4 py-3 outline-none sm:col-span-2" placeholder="Description"></textarea>
+                    <label class="block sm:col-span-2">
+                        <span class="text-sm font-bold text-[#5c6a86]">Description</span>
+                        <textarea name="description" x-model="serviceForm.description" class="mt-2 min-h-24 w-full rounded-2xl border border-[#c8d3ea] px-4 py-3 outline-none focus:border-[#08285f]" placeholder="Description"></textarea>
+                    </label>
                     <input type="hidden" name="rush_fee" value="0">
                     <input type="hidden" name="delivery_fee" value="0">
                 </div>
@@ -190,13 +218,25 @@
                     <button type="button" x-on:click="categoryModalOpen = false" class="rounded-xl border border-[#c8d3ea] px-3 py-2 text-sm font-bold text-[#061a42]">Close</button>
                 </div>
                 <div class="mt-6 grid gap-4">
-                    <input name="name" x-model="categoryForm.name" required class="h-12 rounded-2xl border border-[#c8d3ea] px-4 outline-none" placeholder="Category name">
-                    <input type="number" step="0.01" min="0.25" name="max_kg" x-model="categoryForm.max_kg" required class="h-12 rounded-2xl border border-[#c8d3ea] px-4 outline-none" placeholder="Max KG">
-                    <input type="number" step="0.01" min="0" name="additional_fee" x-model="categoryForm.additional_fee" class="h-12 rounded-2xl border border-[#c8d3ea] px-4 outline-none" placeholder="Additional fee / extra kg">
-                    <select name="is_active" x-model="categoryForm.is_active" class="h-12 rounded-2xl border border-[#c8d3ea] bg-white px-4 outline-none">
-                        <option value="1">Active</option>
-                        <option value="0">Inactive</option>
-                    </select>
+                    <label class="block">
+                        <span class="text-sm font-bold text-[#5c6a86]">Category name</span>
+                        <input name="name" x-model="categoryForm.name" required class="mt-2 h-12 w-full rounded-2xl border border-[#c8d3ea] px-4 outline-none focus:border-[#08285f]" placeholder="Category name">
+                    </label>
+                    <label class="block">
+                        <span class="text-sm font-bold text-[#5c6a86]">Max KG</span>
+                        <input type="number" step="0.01" min="0.25" name="max_kg" x-model="categoryForm.max_kg" required class="mt-2 h-12 w-full rounded-2xl border border-[#c8d3ea] px-4 outline-none focus:border-[#08285f]" placeholder="0.00">
+                    </label>
+                    <label class="block">
+                        <span class="text-sm font-bold text-[#5c6a86]">Additional fee per extra KG</span>
+                        <input type="number" step="0.01" min="0" name="additional_fee" x-model="categoryForm.additional_fee" class="mt-2 h-12 w-full rounded-2xl border border-[#c8d3ea] px-4 outline-none focus:border-[#08285f]" placeholder="0.00">
+                    </label>
+                    <label class="block">
+                        <span class="text-sm font-bold text-[#5c6a86]">Status</span>
+                        <select name="is_active" x-model="categoryForm.is_active" class="mt-2 h-12 w-full rounded-2xl border border-[#c8d3ea] bg-white px-4 outline-none focus:border-[#08285f]">
+                            <option value="1">Active</option>
+                            <option value="0">Inactive</option>
+                        </select>
+                    </label>
                 </div>
                 <button class="mt-6 w-full rounded-2xl bg-[#061a42] px-5 py-4 font-bold text-white">Save category</button>
             </form>

@@ -4,9 +4,10 @@
         ['label' => 'POS / Orders', 'route' => 'pos.orders', 'icon' => 'shopping-cart'],
         ['label' => 'Customers', 'route' => 'customers.index', 'icon' => 'users'],
         ['label' => 'Pricing Services', 'route' => 'pricing.index', 'icon' => 'tags'],
-        ['label' => 'Disbursement', 'route' => 'disbursements.index', 'icon' => 'wallet'],
+        ['label' => 'Daily Report', 'route' => 'disbursements.index', 'icon' => 'wallet'],
         ['label' => 'Reports', 'route' => 'reports.index', 'icon' => 'bar-chart'],
 
+        
         ['label' => 'Inventory', 'route' => 'inventory.index', 'icon' => 'boxes'],
         ['label' => 'Staff', 'route' => 'staff.index', 'icon' => 'badge'],
         ['label' => 'Settings', 'route' => 'settings.index', 'icon' => 'settings'],
@@ -14,7 +15,7 @@
 
     if (auth()->user()?->role === 'staff') {
         $items = collect($items)
-            ->whereIn('route', ['disbursements.index', 'reports.index', 'inventory.index'])
+            ->whereIn('route', ['disbursements.index', 'reports.index', 'inventory.index', 'pos.orders'])
             ->values()
             ->all();
     }
