@@ -4,16 +4,18 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use App\Models\Traits\ScopesToBranch;
 
 class DailySale extends Model
 {
-    use HasFactory;
+    use HasFactory, ScopesToBranch;
 
     protected $fillable = [
         'sale_number',
         'sale_date',
         'amount',
         'notes',
+        'branch',
     ];
 
     protected function casts(): array

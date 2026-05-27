@@ -9,6 +9,7 @@ use App\Models\LaundryOrder;
 use App\Models\LaundryService;
 use App\Models\Machine;
 use App\Models\Subcleaning;
+use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -378,6 +379,77 @@ class PageController extends Controller
         }, $filename, [
             'Content-Type' => 'application/vnd.ms-excel',
         ]);
+    }
+
+    public function staff(Request $request): View
+    {
+        $branch = $request->query('branch', 'Main Store');
+        $staffMembers = User::query()
+            ->where('role', 'staff')
+            ->where('branch', $branch)
+            ->latest()
+            ->get();
+
+        return view('pages.staff', [
+            'staffMembers' => $staffMembers,
+            'currentBranch' => $branch,
+            'branches' => ['Main Store', 'Mintal', 'Gensan City'],
+        ]);
+    }
+
+    public function storeStaff(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'email' => ['required', 'string', 'email', 'max:255', 'unique:users'],
+            'password' => ['required', 'string', 'min:8'],
+            'branch' => ['required', 'string', 'in:Main Store,Mintal,Gensan City'],
+        ]);
+
+        User::query()->create([
+            'name' => $validated['name'],
+            'email' => $validated['email'],
+            'password' => bcrypt($validated['password']),
+            'role' => 'staff',
+            'branch' => $validated['branch'],
+        ]);
+
+        return redirect()->route('staff.index', ['branch' => $validated['branch']])->with('status', 'Staff added successfully.');
+    }
+
+    public function updateStaff(Request $request, User $user): RedirectResponse
+    {
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'email' => ['required', 'string', 'email', 'max:255', 'unique:users,email,'.$user->id],
+            'branch' => ['required', 'string', 'in:Main Store,Mintal,Gensan City'],
+        ]);
+
+        if ($request->filled('password')) {
+            $request->validate(['password' => ['string', 'min:8']]);
+            $validated['password'] = bcrypt($request->password);
+        }
+
+        $user->update($validated);
+
+        return redirect()->route('staff.index', ['branch' => $validated['branch']])->with('status', 'Staff updated successfully.');
+    }
+
+    public function setBranch(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'branch' => ['required', 'string', 'in:Main Store,Mintal,Gensan City'],
+        ]);
+        session(['active_branch' => $validated['branch']]);
+        return back();
+    }
+
+    public function destroyStaff(User $user): RedirectResponse
+    {
+        $branch = $user->branch;
+        $user->delete();
+
+        return redirect()->route('staff.index', ['branch' => $branch])->with('status', 'Staff deleted successfully.');
     }
 
     public function settings(): View

@@ -4,10 +4,13 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use App\Models\Traits\ScopesToBranch;
 
 class Machine extends Model
 {
-    protected $fillable = ['machine_name', 'machine_type', 'status'];
+    use ScopesToBranch;
+
+    protected $fillable = ['machine_name', 'machine_type', 'status', 'branch'];
 
     public function subcleanings(): BelongsToMany
     {

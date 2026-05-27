@@ -5,10 +5,11 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use App\Models\Traits\ScopesToBranch;
 
 class LaundryOrder extends Model
 {
-    use HasFactory;
+    use HasFactory, ScopesToBranch;
 
     public const STATUSES = [
         'received',
@@ -31,6 +32,7 @@ class LaundryOrder extends Model
         'paid_amount',
         'due_at',
         'notes',
+        'branch',
     ];
 
     protected function casts(): array

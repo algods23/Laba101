@@ -4,10 +4,11 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use App\Models\Traits\ScopesToBranch;
 
 class DisbursementExpense extends Model
 {
-    use HasFactory;
+    use HasFactory, ScopesToBranch;
 
     protected $fillable = [
         'disbursement_number',
@@ -16,6 +17,7 @@ class DisbursementExpense extends Model
         'category',
         'description',
         'amount',
+        'branch',
     ];
 
     protected function casts(): array

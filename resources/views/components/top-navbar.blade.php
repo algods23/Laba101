@@ -23,13 +23,22 @@
                 {{ now()->format('M d, Y - h:i A') }}
             </div>
 
-            <label class="hidden items-center gap-2 rounded-2xl border border-[#c8d3ea] bg-white px-3 py-2 text-sm font-semibold text-[#1d2c50] md:flex">
-                <span class="text-[#5c6a86]">Branch</span>
-                <select class="bg-transparent text-[#061a42] outline-none">
-                    <option>Main Store</option>
-                    <option>Pickup Kiosk</option>
-                </select>
-            </label>
+            @if(auth()->check() && auth()->user()->role === 'admin')
+                <form method="POST" action="{{ route('set.branch') }}" class="hidden items-center gap-2 rounded-2xl border border-[#c8d3ea] bg-white px-3 py-2 text-sm font-semibold text-[#1d2c50] md:flex">
+                    @csrf
+                    <span class="text-[#5c6a86]">Branch</span>
+                    <select name="branch" onchange="this.form.submit()" class="bg-transparent text-[#061a42] outline-none">
+                        @foreach(['Main Store', 'Mintal', 'Gensan City'] as $branchOption)
+                            <option value="{{ $branchOption }}" {{ session('active_branch', 'Main Store') === $branchOption ? 'selected' : '' }}>{{ $branchOption }}</option>
+                        @endforeach
+                    </select>
+                </form>
+            @elseif(auth()->check())
+                <div class="hidden items-center gap-2 rounded-2xl border border-[#c8d3ea] bg-white px-3 py-2 text-sm font-semibold text-[#1d2c50] md:flex">
+                    <span class="text-[#5c6a86]">Branch</span>
+                    <span class="text-[#061a42]">{{ auth()->user()->branch ?? 'Main Store' }}</span>
+                </div>
+            @endif
 
             <div class="relative">
                 <button type="button" class="relative flex h-12 w-12 items-center justify-center rounded-2xl border border-[#c8d3ea] bg-white text-[#061a42] transition hover:-translate-y-0.5 hover:border-[#08285f] hover:shadow-lg" x-on:click="notificationsOpen = ! notificationsOpen" aria-label="Notifications">

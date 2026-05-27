@@ -3,10 +3,13 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use App\Models\Traits\ScopesToBranch;
 
 class Subcleaning extends Model
 {
-    protected $fillable = ['date', 'cleaning_status', 'notes'];
+    use ScopesToBranch;
+
+    protected $fillable = ['date', 'cleaning_status', 'notes', 'branch'];
 
     protected $casts = [
         'date' => 'date',

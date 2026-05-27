@@ -17,6 +17,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/reports', [PageController::class, 'reports'])->name('reports.index');
     Route::get('/export-reports', [PageController::class, 'exportReports'])->name('reports.export');
     Route::get('/inventory', [PageController::class, 'placeholder'])->defaults('page', 'inventory')->name('inventory.index');
+    Route::post('/set-branch', [PageController::class, 'setBranch'])->name('set.branch');
 
     Route::get('/maintenance', [PageController::class, 'maintenance'])->name('maintenance.index');
     Route::post('/maintenance/subcleaning', [PageController::class, 'storeSubcleaning'])->name('subcleaning.store');
@@ -25,9 +26,12 @@ Route::middleware('auth')->group(function () {
     Route::patch('/maintenance/machines/{machine}', [PageController::class, 'updateMachine'])->name('machines.update');
     Route::delete('/maintenance/machines/{machine}', [PageController::class, 'destroyMachine'])->name('machines.destroy');
 
+    Route::get('/pos-orders', [DashboardController::class, 'posOrders'])->name('pos.orders');
+    Route::post('/orders', [DashboardController::class, 'store'])->name('orders.store');
+    Route::patch('/orders/{order}/status', [DashboardController::class, 'updateStatus'])->name('orders.status');
+
     Route::middleware('admin')->group(function () {
         Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
-        Route::get('/pos-orders', [DashboardController::class, 'posOrders'])->name('pos.orders');
         Route::get('/customers', [PageController::class, 'placeholder'])->defaults('page', 'customers')->name('customers.index');
         Route::get('/pricing-services', [PageController::class, 'pricing'])->name('pricing.index');
         Route::post('/pricing-services', [PageController::class, 'storeService'])->name('pricing.store');
@@ -36,10 +40,11 @@ Route::middleware('auth')->group(function () {
         Route::post('/item-categories', [PageController::class, 'storeItemCategory'])->name('item-categories.store');
         Route::patch('/item-categories/{itemCategory}', [PageController::class, 'updateItemCategory'])->name('item-categories.update');
         Route::delete('/item-categories/{itemCategory}', [PageController::class, 'destroyItemCategory'])->name('item-categories.destroy');
-        Route::get('/staff', [PageController::class, 'placeholder'])->defaults('page', 'staff')->name('staff.index');
+        Route::get('/staff', [PageController::class, 'staff'])->name('staff.index');
+        Route::post('/staff', [PageController::class, 'storeStaff'])->name('staff.store');
+        Route::patch('/staff/{user}', [PageController::class, 'updateStaff'])->name('staff.update');
+        Route::delete('/staff/{user}', [PageController::class, 'destroyStaff'])->name('staff.destroy');
         Route::get('/settings', [PageController::class, 'settings'])->name('settings.index');
-        Route::post('/orders', [DashboardController::class, 'store'])->name('orders.store');
-        Route::patch('/orders/{order}/status', [DashboardController::class, 'updateStatus'])->name('orders.status');
     });
 
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');

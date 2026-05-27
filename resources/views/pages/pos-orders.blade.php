@@ -135,10 +135,7 @@
                         <h2 class="text-lg font-extrabold text-[#061a42]">Order queue</h2>
                         <p class="mt-1 text-sm text-[#5c6a86]">Latest tickets and current wash stage.</p>
                     </div>
-                    <div class="flex gap-2">
-                        <a href="{{ route('pricing.index') }}" class="rounded-2xl border border-[#c8d3ea] bg-white px-4 py-3 text-sm font-bold text-[#061a42] transition hover:border-[#08285f]">Pricing</a>
-                        <a href="{{ route('reports.index') }}" class="rounded-2xl bg-[#061a42] px-4 py-3 text-sm font-bold text-white transition hover:bg-[#08285f]">Reports</a>
-                    </div>
+    
                 </div>
 
                 <div class="overflow-x-auto">
