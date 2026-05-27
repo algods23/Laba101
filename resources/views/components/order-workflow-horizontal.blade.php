@@ -7,8 +7,8 @@
     $nextKey = $nextStep['key'] ?? null;
 @endphp
 
-<div class="w-full overflow-x-auto">
-    <div class="inline-flex min-w-max items-start gap-3">
+<div class="w-full overflow-hidden">
+    <div class="flex flex-wrap items-start gap-x-3 gap-y-2">
         @foreach ($steps as $index => $step)
             @php
                 $done = in_array($step['key'], $completed, true);

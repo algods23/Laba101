@@ -178,6 +178,8 @@ class DashboardController extends Controller
     {
         $validated = $request->validate([
             'amount' => ['required', 'numeric', 'min:0.01'],
+            'payment_method' => ['required', Rule::in(['cash', 'gcash'])],
+            'payment_reference' => ['nullable', 'required_if:payment_method,gcash', 'string', 'max:120'],
         ]);
 
         $amount = min((float) $order->balance, (float) $validated['amount']);
@@ -188,9 +190,13 @@ class DashboardController extends Controller
 
         $order->update([
             'paid_amount' => min((float) $order->total_amount, (float) $order->paid_amount + $amount),
+            'payment_method' => $validated['payment_method'],
+            'payment_reference' => $validated['payment_method'] === 'gcash'
+                ? $validated['payment_reference']
+                : null,
         ]);
 
-        return redirect()->route('pos.orders')->with('status', 'Payment of PHP '.number_format($amount, 2).' recorded.');
+        return redirect()->route('pos.orders')->with('status', ucfirst($validated['payment_method']).' payment of PHP '.number_format($amount, 2).' recorded.');
     }
 
     private function nextOrderNumber(): string

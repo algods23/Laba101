@@ -33,6 +33,8 @@ class LaundryOrder extends Model
         'extra_service_amount',
         'extra_services',
         'paid_amount',
+        'payment_method',
+        'payment_reference',
         'due_at',
         'notes',
         'branch',
@@ -48,6 +50,8 @@ class LaundryOrder extends Model
             'extra_service_amount' => 'decimal:2',
             'extra_services' => 'array',
             'paid_amount' => 'decimal:2',
+            'payment_method' => 'string',
+            'payment_reference' => 'string',
             'due_at' => 'datetime',
             'workflow_completed' => 'array',
         ];

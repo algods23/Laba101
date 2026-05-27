@@ -196,31 +196,31 @@
     
                 </div>
 
-                <div class="overflow-x-auto">
-                    <table class="w-full min-w-[900px] text-left text-sm">
+                <div class="overflow-x-hidden">
+                    <table class="w-full table-fixed text-left text-sm">
                         <thead class="bg-[#061a42] text-xs uppercase tracking-[0.08em] text-white">
                             <tr>
-                                <th class="px-5 py-4 font-bold">Ticket</th>
-                                <th class="px-5 py-4 font-bold">Customer</th>
-                                <th class="px-5 py-4 font-bold">Service</th>
-                                <th class="px-5 py-4 font-bold">Due</th>
-                                <th class="px-5 py-4 font-bold">Balance</th>
-                                <th class="px-5 py-4 font-bold">Action</th>
+                                <th class="w-[16%] px-3 py-4 font-bold">Ticket</th>
+                                <th class="w-[15%] px-3 py-4 font-bold">Customer</th>
+                                <th class="w-[19%] px-3 py-4 font-bold">Service</th>
+                                <th class="w-[15%] px-3 py-4 font-bold">Due</th>
+                                <th class="w-[17%] px-3 py-4 font-bold">Balance</th>
+                                <th class="w-[18%] px-3 py-4 font-bold">Action</th>
                             </tr>
                         </thead>
                         <tbody>
                             @forelse ($orders as $order)
                                 @php $nextStep = $order->nextWorkflowStep(); @endphp
                                 <tr class="align-top border-t border-[#d8e1f5] transition hover:bg-[#f8fbff]">
-                                    <td class="px-5 py-4">
+                                    <td class="break-words px-3 py-4">
                                         <p class="font-bold text-[#061a42]">{{ $order->order_number }}</p>
                                         <p class="mt-1 text-xs text-[#5c6a86]">{{ number_format($order->weight_kg, 2) }} kg</p>
                                     </td>
-                                    <td class="px-5 py-4">
+                                    <td class="break-words px-3 py-4">
                                         <p class="font-semibold text-[#1d2c50]">{{ $order->customer->name }}</p>
                                         <p class="mt-1 text-xs text-[#5c6a86]">{{ $order->customer->phone ?: 'No phone' }}</p>
                                     </td>
-                                    <td class="px-5 py-4">
+                                    <td class="break-words px-3 py-4">
                                         <p class="font-medium">{{ $order->service->name }}</p>
                                         <p class="mt-1 text-xs text-[#5c6a86]">{{ $order->itemCategory?->name ?: 'No category' }}</p>
                                         <p class="mt-1 text-xs text-[#5c6a86]">PHP {{ number_format($order->total_amount, 2) }}</p>
@@ -228,44 +228,74 @@
                                             <p class="mt-1 text-xs text-[#5c6a86]">Add-ons PHP {{ number_format($order->extra_service_amount, 2) }}</p>
                                         @endif
                                     </td>
-                                    <td class="px-5 py-4">
+                                    <td class="break-words px-3 py-4">
                                         <p class="font-medium">{{ $order->due_at?->format('M d, h:i A') }}</p>
                                         <p class="mt-1 text-xs text-[#5c6a86]">{{ $order->created_at->diffForHumans() }}</p>
                                     </td>
-                                    <td class="px-5 py-4">
-                                        <div class="flex items-start justify-between gap-3">
+                                    <td class="px-3 py-4">
+                                        <div class="flex flex-col gap-2">
                                             <div>
                                                 <p class="font-bold {{ $order->balance > 0 ? 'text-[#9b3d24]' : 'text-[#08285f]' }}">PHP {{ number_format($order->balance, 2) }}</p>
                                                 <p class="mt-1 text-xs text-[#5c6a86]">Paid PHP {{ number_format($order->paid_amount, 2) }}</p>
+                                                @if ($order->payment_method)
+                                                    <p class="mt-1 text-xs font-semibold text-[#5c6a86]">
+                                                        {{ strtoupper($order->payment_method) }}
+                                                        @if ($order->payment_reference)
+                                                            / Ref {{ $order->payment_reference }}
+                                                        @endif
+                                                    </p>
+                                                @endif
                                             </div>
                                             @if ($order->balance > 0)
-                                                <span class="shrink-0 rounded-xl bg-[#fff1f0] px-3 py-2 text-xs font-bold text-[#9b3d24]">Unpaid</span>
+                                                <span class="w-fit rounded-xl bg-[#fff1f0] px-3 py-2 text-xs font-bold text-[#9b3d24]">Unpaid</span>
                                             @else
-                                                <span class="shrink-0 rounded-xl bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700">Paid</span>
+                                                <span class="w-fit rounded-xl bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700">Paid</span>
                                             @endif
                                         </div>
                                     </td>
-                                    <td class="px-5 py-4" x-data="{ showPayment: false }">
-                                        <div class="flex min-w-[220px] flex-col gap-2">
+                                    <td class="px-3 py-4" x-data="{ showPayment: false, paymentMethod: 'cash' }">
+                                        <div class="flex flex-col gap-2">
                                             @if ($order->balance > 0)
                                                 <button
                                                     type="button"
-                                                    x-on:click="showPayment = !showPayment"
-                                                    class="w-full rounded-2xl border border-[#08285f] bg-white px-4 py-2.5 text-xs font-bold text-[#08285f] transition hover:bg-[#f4f7ff]"
+                                                    x-on:click="showPayment = true"
+                                                    class="w-full rounded-2xl border border-[#08285f] bg-white px-3 py-2.5 text-xs font-bold leading-tight text-[#08285f] transition hover:bg-[#f4f7ff]"
                                                 >
                                                     Make a payment
                                                 </button>
                                                 <div
+                                                    x-cloak
                                                     x-show="showPayment"
-                                                    x-transition
-                                                    class="mt-2 rounded-2xl border border-[#c8d3ea] bg-[#f8fbff] p-3 text-xs text-[#061a42]"
+                                                    x-transition.opacity
+                                                    x-on:keydown.escape.window="showPayment = false"
+                                                    class="fixed inset-0 z-50 flex items-center justify-center bg-[#031336]/65 p-4 backdrop-blur-sm"
                                                 >
-                                                    <form method="POST" action="{{ route('orders.pay', $order) }}" class="space-y-2">
+                                                    <form
+                                                        method="POST"
+                                                        action="{{ route('orders.pay', $order) }}"
+                                                        x-on:click.outside="showPayment = false"
+                                                        class="w-full max-w-md rounded-3xl border border-white/70 bg-white p-5 text-sm text-[#061a42] shadow-2xl"
+                                                    >
                                                         @csrf
                                                         @method('PATCH')
-                                                        <div class="flex items-center gap-2">
-                                                            <label class="flex-1">
-                                                                <span class="block text-[10px] font-bold uppercase tracking-[0.12em] text-[#5c6a86]">Amount</span>
+                                                        <div class="flex items-start justify-between gap-4">
+                                                            <div>
+                                                                <p class="text-lg font-extrabold text-[#061a42]">Make a payment</p>
+                                                                <p class="mt-1 text-xs font-semibold text-[#5c6a86]">{{ $order->order_number }} / Balance PHP {{ number_format($order->balance, 2) }}</p>
+                                                            </div>
+                                                            <button
+                                                                type="button"
+                                                                x-on:click="showPayment = false"
+                                                                class="grid h-9 w-9 place-items-center rounded-xl border border-[#c8d3ea] text-lg font-bold text-[#5c6a86] hover:bg-[#f4f7ff]"
+                                                                aria-label="Close payment modal"
+                                                            >
+                                                                &times;
+                                                            </button>
+                                                        </div>
+
+                                                        <div class="mt-5 space-y-4">
+                                                            <label class="block">
+                                                                <span class="block text-xs font-bold uppercase tracking-[0.12em] text-[#5c6a86]">Amount</span>
                                                                 <input
                                                                     type="number"
                                                                     name="amount"
@@ -273,21 +303,47 @@
                                                                     min="0.01"
                                                                     max="{{ $order->balance }}"
                                                                     value="{{ number_format($order->balance, 2, '.', '') }}"
-                                                                    class="mt-1 h-9 w-full rounded-xl border border-[#c8d3ea] bg-white px-3 text-xs font-semibold outline-none focus:border-[#08285f]"
+                                                                    class="mt-2 h-12 w-full rounded-2xl border border-[#c8d3ea] bg-white px-4 text-sm font-semibold outline-none focus:border-[#08285f]"
+                                                                >
+                                                            </label>
+
+                                                            <div>
+                                                                <span class="block text-xs font-bold uppercase tracking-[0.12em] text-[#5c6a86]">Payment method</span>
+                                                                <div class="mt-2 grid grid-cols-2 gap-3">
+                                                                    <label class="cursor-pointer rounded-2xl border border-[#c8d3ea] bg-white p-3 text-center text-sm font-bold text-[#061a42] transition has-[:checked]:border-[#061a42] has-[:checked]:bg-[#eef4ff]">
+                                                                        <input type="radio" name="payment_method" value="cash" x-model="paymentMethod" class="sr-only">
+                                                                        Cash
+                                                                    </label>
+                                                                    <label class="cursor-pointer rounded-2xl border border-[#c8d3ea] bg-white p-3 text-center text-sm font-bold text-[#061a42] transition has-[:checked]:border-[#061a42] has-[:checked]:bg-[#eef4ff]">
+                                                                        <input type="radio" name="payment_method" value="gcash" x-model="paymentMethod" class="sr-only">
+                                                                        GCash
+                                                                    </label>
+                                                                </div>
+                                                            </div>
+
+                                                            <label class="block" x-show="paymentMethod === 'gcash'" x-transition>
+                                                                <span class="block text-xs font-bold uppercase tracking-[0.12em] text-[#5c6a86]">GCash reference</span>
+                                                                <input
+                                                                    type="text"
+                                                                    name="payment_reference"
+                                                                    x-bind:required="paymentMethod === 'gcash'"
+                                                                    class="mt-2 h-12 w-full rounded-2xl border border-[#c8d3ea] bg-white px-4 text-sm font-semibold outline-none focus:border-[#08285f]"
+                                                                    placeholder="Reference number"
                                                                 >
                                                             </label>
                                                         </div>
-                                                        <div class="flex items-center justify-end gap-2 pt-1">
+
+                                                        <div class="mt-5 flex items-center justify-end gap-2">
                                                             <button
                                                                 type="button"
                                                                 x-on:click="showPayment = false"
-                                                                class="rounded-xl border border-[#c8d3ea] px-3 py-1.5 text-[11px] font-bold text-[#5c6a86] hover:bg-white"
+                                                                class="rounded-2xl border border-[#c8d3ea] px-4 py-2.5 text-xs font-bold text-[#5c6a86] hover:bg-[#f4f7ff]"
                                                             >
                                                                 Cancel
                                                             </button>
                                                             <button
                                                                 type="submit"
-                                                                class="rounded-xl bg-[#061a42] px-4 py-1.5 text-[11px] font-bold text-white hover:bg-[#08285f]"
+                                                                class="rounded-2xl bg-[#061a42] px-5 py-2.5 text-xs font-bold text-white hover:bg-[#08285f]"
                                                             >
                                                                 Confirm payment
                                                             </button>
@@ -300,18 +356,18 @@
                                                 <form method="POST" action="{{ route('orders.advance', $order) }}">
                                                     @csrf
                                                     @method('PATCH')
-                                                    <button type="submit" class="w-full rounded-2xl bg-[#061a42] px-4 py-2.5 text-xs font-bold text-white transition hover:bg-[#08285f]">
+                                                    <button type="submit" class="w-full rounded-2xl bg-[#061a42] px-3 py-2.5 text-xs font-bold leading-tight text-white transition hover:bg-[#08285f]">
                                                         {{ $order->actionLabelForStep($nextStep['key']) }}
                                                     </button>
                                                 </form>
                                             @else
-                                                <span class="inline-flex justify-center rounded-2xl bg-emerald-50 px-4 py-2.5 text-xs font-bold text-emerald-700">All done</span>
+                                                <span class="inline-flex justify-center rounded-2xl bg-emerald-50 px-3 py-2.5 text-xs font-bold leading-tight text-emerald-700">All done</span>
                                             @endif
                                         </div>
                                     </td>
                                 </tr>
                                 <tr class="border-b border-[#d8e1f5] bg-[#f8fbff]/80">
-                                    <td colspan="6" class="px-5 py-4">
+                                    <td colspan="6" class="px-3 py-4">
                                         <p class="mb-2 text-[10px] font-bold uppercase tracking-[0.1em] text-[#5c6a86]">Progress</p>
                                         <x-order-workflow-horizontal :order="$order" />
                                     </td>
