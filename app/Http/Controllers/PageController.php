@@ -13,6 +13,7 @@ use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -485,6 +486,7 @@ class PageController extends Controller
             'name' => ['required', 'string', 'max:120'],
             'description' => ['nullable', 'string', 'max:500'],
             'category' => ['required', 'string', 'max:80'],
+            'service_type' => ['required', Rule::in([LaundryService::TYPE_ORDER, LaundryService::TYPE_ADDON])],
             'price_per_kg' => ['required', 'numeric', 'min:0', 'max:999999'],
             'max_kg' => ['required', 'numeric', 'min:0.25', 'max:999999'],
             'drying_minutes' => ['nullable', 'integer', 'min:1', 'max:9999'],

@@ -10,10 +10,15 @@ class LaundryService extends Model
 {
     use HasFactory;
 
+    public const TYPE_ORDER = 'order';
+
+    public const TYPE_ADDON = 'addon';
+
     protected $fillable = [
         'name',
         'description',
         'category',
+        'service_type',
         'price_per_kg',
         'max_kg',
         'drying_minutes',

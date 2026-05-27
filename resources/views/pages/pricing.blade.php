@@ -5,6 +5,7 @@
             'name' => $service->name,
             'description' => $service->description,
             'category' => $service->category,
+            'service_type' => $service->service_type ?? 'order',
             'price_per_kg' => (float) $service->price_per_kg,
             'max_kg' => (float) $service->max_kg,
             'drying_minutes' => $service->drying_minutes,
@@ -55,7 +56,7 @@
         </div>
 
         <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            @foreach ($services as $service)
+            @foreach ($services->where('service_type', 'order') as $service)
                 <article class="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-[0_18px_48px_rgba(6,26,66,.10)]">
                     <div class="flex items-start justify-between gap-3">
                         <div>
@@ -82,6 +83,25 @@
                 </article>
             @endforeach
         </div>
+
+        @php($addonServices = $services->where('service_type', 'addon'))
+        @if ($addonServices->isNotEmpty())
+            <div>
+                <h3 class="text-xl font-extrabold text-[#061a42]">Extra add-on services</h3>
+                <p class="mt-1 text-sm text-[#5c6a86]">Optional extras staff can add on POS orders (Zonrox, Fabcon, etc.).</p>
+                <div class="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                    @foreach ($addonServices as $addon)
+                        <article class="rounded-3xl border border-dashed border-[#c8d3ea] bg-white/90 p-5 shadow-sm">
+                            <p class="text-xs font-bold uppercase tracking-[0.12em] text-[#5c6a86]">Add-on</p>
+                            <h3 class="mt-2 text-lg font-extrabold text-[#061a42]">{{ $addon->name }}</h3>
+                            <p class="mt-4 text-3xl font-extrabold text-[#061a42]">PHP {{ number_format($addon->price_per_kg, 2) }}</p>
+                            <p class="mt-2 text-sm text-[#5c6a86]">{{ $addon->description }}</p>
+                            <button type="button" x-on:click="openServiceEdit({{ $addon->id }})" class="mt-4 h-11 w-full rounded-2xl border border-[#c8d3ea] text-sm font-bold text-[#061a42] transition hover:border-[#08285f]">Edit</button>
+                        </article>
+                    @endforeach
+                </div>
+            </div>
+        @endif
 
         <div class="grid gap-6 xl:grid-cols-[1fr_380px]">
             <article class="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-[0_18px_48px_rgba(6,26,66,.10)]">
@@ -130,11 +150,11 @@
                     </select>
                     <input type="number" step="0.01" min="0.25" x-model.number="calculator.weight" class="h-12 w-full rounded-2xl border border-[#c8d3ea] px-4 text-sm font-semibold outline-none" placeholder="Total weight kg">
                     <div class="rounded-2xl bg-[#f4f7ff] p-4 text-sm">
-                        <p class="font-bold text-[#061a42]" x-text="'Allowed load: ' + computed.allowedKg.toFixed(2) + ' kg'"></p>
-                        <p class="mt-2 text-[#5c6a86]" x-text="'Service Price: PHP ' + computed.servicePrice.toFixed(2)"></p>
-                        <p class="text-[#5c6a86]" x-text="'Additional KG Fee: PHP ' + computed.additionalCharge.toFixed(2)"></p>
+                        <p class="font-bold text-[#061a42]" x-text="computed.categoryLabel"></p>
+                        <p class="mt-2 text-[#5c6a86]" x-text="'Base service: PHP ' + computed.servicePrice.toFixed(2)"></p>
+                        <p class="text-[#5c6a86]" x-show="computed.additionalCharge > 0" x-text="'Overweight fee: PHP ' + computed.additionalCharge.toFixed(2)"></p>
                         <p class="mt-3 text-xl font-extrabold text-[#061a42]" x-text="'Total: PHP ' + computed.total.toFixed(2)"></p>
-                        <p x-show="computed.warning" class="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs font-bold text-red-700">Selected items exceed allowed load capacity.</p>
+                        <p x-show="computed.warning" x-text="computed.warning" class="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs font-bold text-red-700"></p>
                     </div>
                 </div>
             </article>
@@ -154,12 +174,21 @@
                         <input name="name" x-model="serviceForm.name" required class="mt-2 h-12 w-full rounded-2xl border border-[#c8d3ea] px-4 outline-none focus:border-[#08285f]" placeholder="Service name">
                     </label>
                     <label class="block">
-                        <span class="text-sm font-bold text-[#5c6a86]">Service type</span>
+                        <span class="text-sm font-bold text-[#5c6a86]">Billing group</span>
                         <select name="category" x-model="serviceForm.category" required class="mt-2 h-12 w-full rounded-2xl border border-[#c8d3ea] bg-white px-4 outline-none focus:border-[#08285f]">
                             <option>Self Service</option>
                             <option>Drop-Off</option>
                             <option>Full Service</option>
                             <option>Dry Only</option>
+                            <option>Comforter</option>
+                            <option>Add-on</option>
+                        </select>
+                    </label>
+                    <label class="block">
+                        <span class="text-sm font-bold text-[#5c6a86]">POS usage</span>
+                        <select name="service_type" x-model="serviceForm.service_type" required class="mt-2 h-12 w-full rounded-2xl border border-[#c8d3ea] bg-white px-4 outline-none focus:border-[#08285f]">
+                            <option value="order">Main laundry service</option>
+                            <option value="addon">Extra add-on (Zonrox, Fabcon)</option>
                         </select>
                     </label>
                     <label class="block">
@@ -257,20 +286,28 @@
                 serviceForm: {},
                 categoryForm: {},
                 calculator: { serviceId: config.services[0]?.id, categoryId: config.categories[0]?.id, weight: 1 },
-                get activeServices() { return this.services.filter(service => Number(service.is_active) === 1); },
+                get activeServices() { return this.services.filter(service => Number(service.is_active) === 1 && service.service_type === 'order'); },
                 get activeCategories() { return this.categories.filter(category => Number(category.is_active) === 1); },
                 get computed() {
                     const service = this.services.find(item => item.id === Number(this.calculator.serviceId)) || {};
                     const category = this.categories.find(item => item.id === Number(this.calculator.categoryId)) || {};
-                    const allowedKg = Math.min(Number(service.max_kg || 0), Number(category.max_kg || 0));
+                    const allowedKg = Number(category.max_kg || 0);
                     const weight = Number(this.calculator.weight || 0);
-                    const extraKg = Math.max(0, weight - allowedKg);
+                    const extraKg = allowedKg > 0 ? Math.max(0, weight - allowedKg) : 0;
                     const additionalCharge = extraKg > 0 ? Math.ceil(extraKg) * (Number(service.additional_charge || 0) + Number(category.additional_fee || 0)) : 0;
                     const servicePrice = Number(service.price_per_kg || 0);
-                    return { allowedKg, servicePrice, additionalCharge, total: servicePrice + additionalCharge, warning: extraKg > 0 };
+                    const categoryName = category.name || 'item category';
+                    return {
+                        allowedKg,
+                        categoryLabel: category.name ? `Allowed load (${category.name}): ${allowedKg.toFixed(2)} kg` : 'Select category',
+                        servicePrice,
+                        additionalCharge,
+                        total: servicePrice + additionalCharge,
+                        warning: extraKg > 0 ? `Weight exceeds the ${categoryName} load limit of ${allowedKg.toFixed(2)} kg.` : null,
+                    };
                 },
                 openServiceCreate() {
-                    this.serviceForm = { id: null, name: '', description: '', category: 'Self Service', price_per_kg: '', max_kg: 8, drying_minutes: '', includes: [], additional_charge: 0, turnaround_hours: 24, is_active: 1 };
+                    this.serviceForm = { id: null, name: '', description: '', category: 'Self Service', service_type: 'order', price_per_kg: '', max_kg: 8, drying_minutes: '', includes: [], additional_charge: 0, turnaround_hours: 24, is_active: 1 };
                     this.serviceModalOpen = true;
                 },
                 openServiceEdit(id) {

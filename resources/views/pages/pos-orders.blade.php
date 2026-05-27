@@ -3,10 +3,13 @@
         services: @js($services->map(fn ($service) => [
             'id' => $service->id,
             'name' => $service->name,
+            'description' => $service->description,
             'price_per_kg' => (float) $service->price_per_kg,
             'max_kg' => (float) $service->max_kg,
             'drying_minutes' => $service->drying_minutes,
             'additional_charge' => (float) $service->additional_charge,
+            'turnaround_hours' => (int) $service->turnaround_hours,
+            'default_category' => str_contains($service->name, 'Comforter') ? 'Comforter' : 'Regular Clothes',
         ])->values()),
         categories: @js($itemCategories->map(fn ($category) => [
             'id' => $category->id,
@@ -14,6 +17,15 @@
             'max_kg' => (float) $category->max_kg,
             'additional_fee' => (float) $category->additional_fee,
         ])->values()),
+        addons: @js($addonServices->map(fn ($addon) => [
+            'id' => $addon->id,
+            'name' => $addon->name,
+            'price' => (float) $addon->price_per_kg,
+        ])->values()),
+        initialServiceId: @js(old('service_id')),
+        initialCategoryId: @js(old('item_category_id')),
+        initialWeight: @js(old('weight_kg', 1)),
+        initialAddons: @js(old('extra_services', [])),
     })" class="space-y-6">
         @if (session('status'))
             <div class="rounded-2xl border border-[#9fb4e6] bg-white/80 px-5 py-4 text-sm font-semibold text-[#061a42] shadow-sm backdrop-blur">
@@ -60,7 +72,12 @@
                         <select name="customer_id" class="mt-2 h-12 w-full rounded-2xl border border-[#c8d3ea] bg-white px-4 text-sm font-semibold text-[#061a42] outline-none focus:border-[#08285f]">
                             <option value="">Walk-in / new customer</option>
                             @foreach ($customers as $customer)
-                                <option value="{{ $customer->id }}" @selected(old('customer_id') == $customer->id)>{{ $customer->name }}</option>
+                                <option
+                                    value="{{ $customer->id }}"
+                                    data-customer-name="{{ $customer->name }}"
+                                    data-customer-phone="{{ $customer->phone }}"
+                                    @selected(old('customer_id') == $customer->id)
+                                >{{ $customer->name }}</option>
                             @endforeach
                         </select>
                     </label>
@@ -68,7 +85,12 @@
                     <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
                         <label class="block">
                             <span class="text-xs font-bold uppercase tracking-[0.08em] text-[#5c6a86]">Customer name</span>
-                            <input name="customer_name" value="{{ old('customer_name') }}" class="mt-2 h-12 w-full rounded-2xl border border-[#c8d3ea] bg-white px-4 text-sm font-semibold text-[#061a42] outline-none focus:border-[#08285f]" placeholder="Walk-in name">
+                            <input
+                                name="customer_name"
+                                value="{{ old('customer_name') }}"
+                                class="mt-2 h-12 w-full rounded-2xl border border-[#c8d3ea] bg-white px-4 text-sm font-semibold text-[#061a42] outline-none focus:border-[#08285f]"
+                                placeholder="Walk-in name"
+                            >
                         </label>
 
                         <label class="block">
@@ -79,17 +101,18 @@
 
                     <label class="block">
                         <span class="text-xs font-bold uppercase tracking-[0.08em] text-[#5c6a86]">Service</span>
-                        <select name="service_id" x-model.number="serviceId" required class="mt-2 h-12 w-full rounded-2xl border border-[#c8d3ea] bg-white px-4 text-sm font-semibold text-[#061a42] outline-none focus:border-[#08285f]">
+                        <select name="service_id" x-model.number="serviceId" x-on:change="onServiceChange()" required class="mt-2 h-12 w-full rounded-2xl border border-[#c8d3ea] bg-white px-4 text-sm font-semibold text-[#061a42] outline-none focus:border-[#08285f]">
                             <option value="">Select service</option>
                             @foreach ($services as $service)
                                 <option value="{{ $service->id }}" @selected(old('service_id') == $service->id)>{{ $service->name }} - PHP {{ number_format($service->price_per_kg, 2) }}</option>
                             @endforeach
                         </select>
+                        <p x-show="selectedService?.description" x-text="selectedService?.description" class="mt-2 text-xs text-[#5c6a86]"></p>
                     </label>
 
                     <label class="block">
                         <span class="text-xs font-bold uppercase tracking-[0.08em] text-[#5c6a86]">Item category</span>
-                        <select name="item_category_id" x-model.number="categoryId" required class="mt-2 h-12 w-full rounded-2xl border border-[#c8d3ea] bg-white px-4 text-sm font-semibold text-[#061a42] outline-none focus:border-[#08285f]">
+                        <select name="item_category_id" x-model.number="categoryId" x-on:change="onCategoryChange()" required class="mt-2 h-12 w-full rounded-2xl border border-[#c8d3ea] bg-white px-4 text-sm font-semibold text-[#061a42] outline-none focus:border-[#08285f]">
                             <option value="">Select category</option>
                             @foreach ($itemCategories as $category)
                                 <option value="{{ $category->id }}" @selected(old('item_category_id') == $category->id)>{{ $category->name }} - max {{ number_format($category->max_kg, 2) }} kg</option>
@@ -97,10 +120,43 @@
                         </select>
                     </label>
 
+                    @if ($addonServices->isNotEmpty())
+                        <div class="block">
+                            <span class="text-xs font-bold uppercase tracking-[0.08em] text-[#5c6a86]">Extra services</span>
+                            <div class="mt-2 space-y-2 rounded-2xl border border-[#c8d3ea] bg-white p-3">
+                                @foreach ($addonServices as $addon)
+                                    <label class="flex cursor-pointer items-center justify-between gap-3 rounded-xl px-2 py-2 transition hover:bg-[#f4f7ff]">
+                                        <span class="flex items-center gap-3">
+                                            <input
+                                                type="checkbox"
+                                                name="extra_services[]"
+                                                value="{{ $addon->id }}"
+                                                x-model="selectedAddons"
+                                                class="h-4 w-4 rounded border-[#c8d3ea] text-[#061a42] focus:ring-[#08285f]"
+                                            >
+                                            <span class="text-sm font-semibold text-[#061a42]">{{ $addon->name }}</span>
+                                        </span>
+                                        <span class="text-sm font-bold text-[#5c6a86]">+ PHP {{ number_format($addon->price_per_kg, 2) }}</span>
+                                    </label>
+                                @endforeach
+                            </div>
+                        </div>
+                    @endif
+
                     <div class="grid gap-4 sm:grid-cols-2">
                         <label class="block">
                             <span class="text-xs font-bold uppercase tracking-[0.08em] text-[#5c6a86]">Weight kg</span>
-                            <input type="number" step="0.01" min="0.25" name="weight_kg" x-model.number="weightKg" value="{{ old('weight_kg') }}" required class="mt-2 h-12 w-full rounded-2xl border border-[#c8d3ea] bg-white px-4 text-sm font-semibold text-[#061a42] outline-none focus:border-[#08285f]">
+                            <input
+                                type="number"
+                                step="0.01"
+                                min="0.25"
+                                name="weight_kg"
+                                x-model.number="weightKg"
+                                x-bind:max="computed.allowedKg > 0 ? computed.allowedKg * 3 : 200"
+                                required
+                                class="mt-2 h-12 w-full rounded-2xl border border-[#c8d3ea] bg-white px-4 text-sm font-semibold text-[#061a42] outline-none focus:border-[#08285f]"
+                            >
+                            <p class="mt-1 text-xs text-[#5c6a86]" x-text="'Max for this category: ' + (computed.allowedKg > 0 ? computed.allowedKg.toFixed(2) + ' kg' : 'select category')"></p>
                         </label>
 
                         <label class="block">
@@ -111,13 +167,15 @@
 
                     <div class="rounded-2xl bg-[#f4f7ff] p-4 text-sm">
                         <div class="mb-3 h-2 overflow-hidden rounded-full bg-[#d8e1f5]">
-                            <div class="h-full rounded-full bg-[#061a42]" x-bind:style="'width: ' + Math.min(100, indicatorPercent) + '%'"></div>
+                            <div class="h-full rounded-full transition-all" x-bind:class="computed.warning ? 'bg-red-500' : 'bg-[#061a42]'" x-bind:style="'width: ' + Math.min(100, indicatorPercent) + '%'"></div>
                         </div>
-                        <p class="font-bold text-[#061a42]" x-text="'Allowed load: ' + computed.allowedKg.toFixed(2) + ' kg'"></p>
-                        <p class="mt-2 text-[#5c6a86]" x-text="'Service Price: PHP ' + computed.servicePrice.toFixed(2)"></p>
-                        <p class="text-[#5c6a86]" x-text="'Additional KG Fee: PHP ' + computed.additionalCharge.toFixed(2)"></p>
+                        <p class="font-bold text-[#061a42]" x-text="computed.categoryLabel"></p>
+                        <p class="mt-1 text-[#5c6a86]" x-text="'Base service: PHP ' + computed.servicePrice.toFixed(2)"></p>
+                        <p class="text-[#5c6a86]" x-show="computed.extraServiceAmount > 0" x-text="'Extra services: PHP ' + computed.extraServiceAmount.toFixed(2)"></p>
+                        <p class="text-[#5c6a86]" x-show="computed.additionalCharge > 0" x-text="'Overweight fee: PHP ' + computed.additionalCharge.toFixed(2)"></p>
+                        <p class="mt-1 text-xs text-[#5c6a86]" x-show="selectedService?.turnaround_hours" x-text="'Estimated ready: ~' + selectedService.turnaround_hours + ' hour(s)'"></p>
                         <p class="mt-2 text-lg font-extrabold text-[#061a42]" x-text="'Total: PHP ' + computed.total.toFixed(2)"></p>
-                        <p x-show="computed.warning" class="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs font-bold text-red-700">Selected items exceed allowed load capacity.</p>
+                        <p x-show="computed.warning" x-text="computed.warning" class="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs font-bold text-red-700"></p>
                     </div>
 
                     <label class="block">
@@ -147,7 +205,7 @@
                                 <th class="px-5 py-4 font-bold">Service</th>
                                 <th class="px-5 py-4 font-bold">Due</th>
                                 <th class="px-5 py-4 font-bold">Balance</th>
-                                <th class="px-5 py-4 font-bold">Status</th>
+                                <th class="px-5 py-4 font-bold">Progress</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-[#d8e1f5]">
@@ -165,6 +223,9 @@
                                         <p class="font-medium">{{ $order->service->name }}</p>
                                         <p class="mt-1 text-xs text-[#5c6a86]">{{ $order->itemCategory?->name ?: 'No category' }}</p>
                                         <p class="mt-1 text-xs text-[#5c6a86]">PHP {{ number_format($order->total_amount, 2) }}</p>
+                                        @if ($order->extra_service_amount > 0)
+                                            <p class="mt-1 text-xs text-[#5c6a86]">Add-ons PHP {{ number_format($order->extra_service_amount, 2) }}</p>
+                                        @endif
                                     </td>
                                     <td class="px-5 py-4">
                                         <p class="font-medium">{{ $order->due_at?->format('M d, h:i A') }}</p>
@@ -176,15 +237,7 @@
                                             <p class="mt-1 text-xs text-[#5c6a86]">Paid PHP {{ number_format($order->paid_amount, 2) }}</p>
                                     </td>
                                     <td class="px-5 py-4">
-                                        <form method="POST" action="{{ route('orders.status', $order) }}">
-                                            @csrf
-                                            @method('PATCH')
-                                            <select name="status" onchange="this.form.submit()" class="h-11 w-full rounded-2xl border border-[#c8d3ea] bg-white px-4 text-sm font-semibold capitalize outline-none focus:border-[#08285f]">
-                                                @foreach (\App\Models\LaundryOrder::STATUSES as $status)
-                                                    <option value="{{ $status }}" @selected($order->status === $status)>{{ str_replace('_', ' ', $status) }}</option>
-                                                @endforeach
-                                            </select>
-                                        </form>
+                                        <x-order-workflow :order="$order" />
                                     </td>
                                 </tr>
                             @empty
@@ -204,24 +257,153 @@
             return {
                 services: config.services,
                 categories: config.categories,
-                serviceId: config.services[0]?.id || '',
-                categoryId: config.categories[0]?.id || '',
-                weightKg: 1,
+                addons: config.addons,
+                serviceId: config.initialServiceId ? Number(config.initialServiceId) : '',
+                categoryId: config.initialCategoryId ? Number(config.initialCategoryId) : '',
+                weightKg: Number(config.initialWeight) || 1,
+                selectedAddons: (config.initialAddons || []).map(id => Number(id)),
+                init() {
+                    if (!this.serviceId && this.services.length) {
+                        this.serviceId = this.services[0].id;
+                    }
+                    if (!this.categoryId) {
+                        this.onServiceChange(false);
+                    }
+                },
+                get selectedService() {
+                    return this.services.find(item => item.id === Number(this.serviceId)) || null;
+                },
+                get selectedCategory() {
+                    return this.categories.find(item => item.id === Number(this.categoryId)) || null;
+                },
+                onServiceChange(resetWeight = true) {
+                    const service = this.selectedService;
+                    if (!service) return;
+                    const category = this.categories.find(c => c.name === service.default_category)
+                        || this.categories.find(c => c.name === 'Regular Clothes');
+                    if (category) {
+                        this.categoryId = category.id;
+                    }
+                    if (resetWeight && this.selectedCategory) {
+                        this.weightKg = Math.min(this.weightKg || 1, this.selectedCategory.max_kg);
+                    }
+                },
+                onCategoryChange(resetWeight = true) {
+                    const category = this.selectedCategory;
+                    if (!category || !resetWeight) return;
+                    if (this.weightKg > category.max_kg) {
+                        this.weightKg = category.max_kg;
+                    }
+                },
                 get computed() {
-                    const service = this.services.find(item => item.id === Number(this.serviceId)) || {};
-                    const category = this.categories.find(item => item.id === Number(this.categoryId)) || {};
-                    const allowedKg = Math.min(Number(service.max_kg || 0), Number(category.max_kg || 0));
+                    const service = this.selectedService || {};
+                    const category = this.selectedCategory || {};
+                    const allowedKg = Number(category.max_kg || 0);
                     const weight = Number(this.weightKg || 0);
-                    const extraKg = Math.max(0, weight - allowedKg);
-                    const additionalCharge = extraKg > 0 ? Math.ceil(extraKg) * (Number(service.additional_charge || 0) + Number(category.additional_fee || 0)) : 0;
+                    const extraKg = allowedKg > 0 ? Math.max(0, weight - allowedKg) : 0;
+                    const additionalCharge = extraKg > 0
+                        ? Math.ceil(extraKg) * (Number(service.additional_charge || 0) + Number(category.additional_fee || 0))
+                        : 0;
                     const servicePrice = Number(service.price_per_kg || 0);
+                    const extraServiceAmount = this.addons
+                        .filter(addon => this.selectedAddons.map(Number).includes(Number(addon.id)))
+                        .reduce((sum, addon) => sum + Number(addon.price || 0), 0);
+                    const categoryName = category.name || 'item category';
+                    const warning = extraKg > 0
+                        ? `Weight exceeds the ${categoryName} load limit of ${allowedKg.toFixed(2)} kg.`
+                        : null;
 
-                    return { allowedKg, servicePrice, additionalCharge, total: servicePrice + additionalCharge, warning: extraKg > 0 };
+                    return {
+                        allowedKg,
+                        categoryLabel: category.name
+                            ? `Allowed load (${category.name}): ${allowedKg.toFixed(2)} kg`
+                            : 'Select an item category to see allowed load',
+                        servicePrice,
+                        additionalCharge,
+                        extraServiceAmount,
+                        total: servicePrice + additionalCharge + extraServiceAmount,
+                        warning,
+                    };
                 },
                 get indicatorPercent() {
                     return this.computed.allowedKg > 0 ? (Number(this.weightKg || 0) / this.computed.allowedKg) * 100 : 0;
                 },
             };
         }
+    </script>
+
+    <script>
+        function orderWorkflow(config) {
+            return {
+                steps: config.steps,
+                completed: [...config.completed],
+                toggle(key) {
+                    const keys = this.steps.map(step => step.key);
+                    const index = keys.indexOf(key);
+                    if (index === -1) return;
+
+                    if (this.completed.includes(key)) {
+                        this.completed = keys.slice(0, index);
+                    } else {
+                        this.completed = keys.slice(0, index + 1);
+                    }
+
+                    this.$nextTick(() => this.$refs.workflowForm.submit());
+                },
+                isDone(key) {
+                    return this.completed.includes(key);
+                },
+                isNext(key) {
+                    const keys = this.steps.map(step => step.key);
+                    const index = keys.indexOf(key);
+                    if (index === 0) return !this.completed.length;
+                    return !this.isDone(key) && this.isDone(keys[index - 1]);
+                },
+                canToggle(key) {
+                    return this.isDone(key) || this.isNext(key);
+                },
+            };
+        }
+    </script>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const customerSelect = document.querySelector('select[name="customer_id"]');
+            const customerNameInput = document.querySelector('input[name="customer_name"]');
+            const customerPhoneInput = document.querySelector('input[name="customer_phone"]');
+            if (!customerSelect || !customerNameInput || !customerPhoneInput) return;
+
+            const fillFromSelectedCustomer = () => {
+                const option = customerSelect.selectedOptions?.[0];
+                customerNameInput.value = (option?.dataset?.customerName || option?.textContent || '').trim();
+                customerPhoneInput.value = (option?.dataset?.customerPhone || '').trim();
+                customerNameInput.required = false;
+                customerNameInput.dataset.autofilled = 'true';
+            };
+
+            customerSelect.addEventListener('change', () => {
+                if (!customerSelect.value) {
+                    if (customerNameInput.dataset.autofilled === 'true') {
+                        customerNameInput.value = '';
+                        customerPhoneInput.value = '';
+                    }
+                    customerNameInput.required = true;
+                    customerNameInput.dataset.autofilled = 'false';
+                    return;
+                }
+                fillFromSelectedCustomer();
+            });
+
+            if (customerSelect.value) {
+                if (!customerNameInput.value && !customerPhoneInput.value) {
+                    fillFromSelectedCustomer();
+                } else {
+                    customerNameInput.required = false;
+                    customerNameInput.dataset.autofilled = 'true';
+                }
+            } else {
+                customerNameInput.required = true;
+            }
+        });
     </script>
 </x-app-layout>

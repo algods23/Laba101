@@ -52,6 +52,7 @@ class DatabaseSeeder extends Seeder
         $washFold = LaundryService::query()->updateOrCreate(['name' => 'Drop-off'], [
             'description' => 'Wash, dry and fold.',
             'category' => 'Drop-Off',
+            'service_type' => LaundryService::TYPE_ORDER,
             'price_per_kg' => 185,
             'max_kg' => 8,
             'drying_minutes' => 40,
@@ -66,6 +67,7 @@ class DatabaseSeeder extends Seeder
         $express = LaundryService::query()->updateOrCreate(['name' => 'Full Service'], [
             'description' => 'Wash, dry, fold, detergent and Fabcon.',
             'category' => 'Full Service',
+            'service_type' => LaundryService::TYPE_ORDER,
             'price_per_kg' => 200,
             'max_kg' => 8,
             'drying_minutes' => 40,
@@ -161,11 +163,42 @@ class DatabaseSeeder extends Seeder
             'is_active' => true,
         ]);
 
+        LaundryService::query()->updateOrCreate(['name' => 'Additional Zonrox'], [
+            'description' => 'Extra Zonrox bleach add-on per load.',
+            'category' => 'Add-on',
+            'service_type' => LaundryService::TYPE_ADDON,
+            'price_per_kg' => 25,
+            'max_kg' => 0,
+            'drying_minutes' => null,
+            'includes' => ['Zonrox'],
+            'additional_charge' => 0,
+            'rush_fee' => 0,
+            'delivery_fee' => 0,
+            'turnaround_hours' => 0,
+            'is_active' => true,
+        ]);
+
+        LaundryService::query()->updateOrCreate(['name' => 'Additional Fabcon'], [
+            'description' => 'Extra Fabcon fabric conditioner add-on per load.',
+            'category' => 'Add-on',
+            'service_type' => LaundryService::TYPE_ADDON,
+            'price_per_kg' => 25,
+            'max_kg' => 0,
+            'drying_minutes' => null,
+            'includes' => ['Fabcon'],
+            'additional_charge' => 0,
+            'rush_fee' => 0,
+            'delivery_fee' => 0,
+            'turnaround_hours' => 0,
+            'is_active' => true,
+        ]);
+
         LaundryService::query()->updateOrCreate(['name' => 'Comforter / Bulky Load'], [
             'description' => 'Comforter 4kg max per load. Thin blankets, bedsheets, bath towels, pillow cases and curtains: 6kg max per load.',
             'category' => 'Comforter',
+            'service_type' => LaundryService::TYPE_ORDER,
             'price_per_kg' => 200,
-            'max_kg' => 4,
+            'max_kg' => 8,
             'drying_minutes' => 40,
             'includes' => ['Wash', 'Dry', 'Fold'],
             'additional_charge' => 0,
@@ -241,5 +274,10 @@ class DatabaseSeeder extends Seeder
             'paid_amount' => 0,
             'due_at' => now()->addHours(36),
         ]);
+
+        LaundryService::query()->update(['service_type' => LaundryService::TYPE_ORDER]);
+        LaundryService::query()
+            ->whereIn('name', ['Additional Zonrox', 'Additional Fabcon'])
+            ->update(['service_type' => LaundryService::TYPE_ADDON]);
     }
 }

@@ -24,7 +24,11 @@ class DashboardController extends Controller
 
         return view('dashboard', [
             'customers' => Customer::query()->orderBy('name')->get(),
-            'services' => LaundryService::query()->where('is_active', true)->orderBy('name')->get(),
+            'services' => LaundryService::query()
+                ->where('is_active', true)
+                ->where('service_type', LaundryService::TYPE_ORDER)
+                ->orderBy('name')
+                ->get(),
             'orders' => $orders,
             'revenueLabels' => collect(range(6, 0))->map(fn (int $days) => now()->subDays($days)->format('M d'))->values(),
             'revenueData' => collect(range(6, 0))->map(fn (int $days) => (float) LaundryOrder::query()
@@ -52,7 +56,16 @@ class DashboardController extends Controller
 
         return view('pages.pos-orders', [
             'customers' => Customer::query()->orderBy('name')->get(),
-            'services' => LaundryService::query()->where('is_active', true)->orderBy('name')->get(),
+            'services' => LaundryService::query()
+                ->where('is_active', true)
+                ->where('service_type', LaundryService::TYPE_ORDER)
+                ->orderBy('name')
+                ->get(),
+            'addonServices' => LaundryService::query()
+                ->where('is_active', true)
+                ->where('service_type', LaundryService::TYPE_ADDON)
+                ->orderBy('name')
+                ->get(),
             'itemCategories' => ItemCategory::query()->where('is_active', true)->orderBy('name')->get(),
             'orders' => $orders,
             'stats' => [
@@ -73,19 +86,33 @@ class DashboardController extends Controller
             'service_id' => ['required', 'exists:laundry_services,id'],
             'item_category_id' => ['required', 'exists:item_categories,id'],
             'weight_kg' => ['required', 'numeric', 'min:0.25', 'max:200'],
+            'extra_services' => ['nullable', 'array'],
+            'extra_services.*' => ['integer', 'exists:laundry_services,id'],
             'paid_amount' => ['nullable', 'numeric', 'min:0'],
             'notes' => ['nullable', 'string', 'max:500'],
         ]);
 
-        $service = LaundryService::query()->findOrFail($validated['service_id']);
+        $service = LaundryService::query()
+            ->where('service_type', LaundryService::TYPE_ORDER)
+            ->findOrFail($validated['service_id']);
         $itemCategory = ItemCategory::query()->findOrFail($validated['item_category_id']);
-        $pricing = $pricingService->calculate($service, $itemCategory, (float) $validated['weight_kg']);
-        $customer = empty($validated['customer_id'])
-            ? Customer::query()->create([
+        $addons = LaundryService::query()
+            ->where('service_type', LaundryService::TYPE_ADDON)
+            ->whereIn('id', $validated['extra_services'] ?? [])
+            ->get();
+        $pricing = $pricingService->calculate($service, $itemCategory, (float) $validated['weight_kg'], $addons);
+        if (empty($validated['customer_id'])) {
+            $customer = Customer::query()->create([
                 'name' => $validated['customer_name'],
                 'phone' => $validated['customer_phone'] ?? null,
-            ])
-            : Customer::query()->findOrFail($validated['customer_id']);
+            ]);
+        } else {
+            $customer = Customer::query()->findOrFail($validated['customer_id']);
+            $customer->update([
+                'name' => $validated['customer_name'] ?: $customer->name,
+                'phone' => $validated['customer_phone'] ?? $customer->phone,
+            ]);
+        }
 
         LaundryOrder::query()->create([
             'order_number' => $this->nextOrderNumber(),
@@ -93,10 +120,13 @@ class DashboardController extends Controller
             'service_id' => $service->id,
             'item_category_id' => $itemCategory->id,
             'status' => 'received',
+            'workflow_completed' => [],
             'weight_kg' => $validated['weight_kg'],
             'price_per_kg' => $service->price_per_kg,
             'total_amount' => $pricing['total_price'],
             'additional_charge' => $pricing['additional_charge'],
+            'extra_service_amount' => $pricing['extra_service_amount'],
+            'extra_services' => $pricing['extra_services'] ?: null,
             'paid_amount' => $validated['paid_amount'] ?? 0,
             'due_at' => now()->addHours($service->turnaround_hours),
             'notes' => trim(($validated['notes'] ?? '').($pricing['warning'] ? "\n".$pricing['warning'] : '')) ?: null,
@@ -107,22 +137,37 @@ class DashboardController extends Controller
 
     public function updateStatus(Request $request, LaundryOrder $order): RedirectResponse
     {
+        $stepKeys = $order->workflowStepKeys();
+
         $validated = $request->validate([
-            'status' => ['required', Rule::in(LaundryOrder::STATUSES)],
+            'workflow_completed' => ['present', 'array'],
+            'workflow_completed.*' => ['string', Rule::in($stepKeys)],
         ]);
 
-        $order->update($validated);
+        $completed = LaundryOrder::normalizeWorkflowCompleted($stepKeys, $validated['workflow_completed']);
 
-        return redirect()->route('pos.orders')->with('status', 'Order status updated.');
+        $order->update([
+            'workflow_completed' => $completed,
+            'status' => $order->syncStatusFromWorkflow($completed),
+        ]);
+
+        return redirect()->route('pos.orders')->with('status', 'Order progress updated.');
     }
 
     private function nextOrderNumber(): string
     {
         $prefix = 'LB'.now()->format('ymd');
-        $count = LaundryOrder::query()
-            ->where('order_number', 'like', $prefix.'%')
-            ->count() + 1;
 
-        return $prefix.'-'.str_pad((string) $count, 3, '0', STR_PAD_LEFT);
+        // Order numbers are globally unique; ignore branch scope when finding the next sequence.
+        $lastOrderNumber = LaundryOrder::withoutGlobalScope('branch')
+            ->where('order_number', 'like', $prefix.'-%')
+            ->orderByDesc('order_number')
+            ->value('order_number');
+
+        $sequence = $lastOrderNumber
+            ? ((int) substr($lastOrderNumber, -3)) + 1
+            : 1;
+
+        return $prefix.'-'.str_pad((string) $sequence, 3, '0', STR_PAD_LEFT);
     }
 }

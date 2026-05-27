@@ -16,7 +16,7 @@
 
     if (auth()->user()?->role === 'staff') {
         $items = collect($items)
-            ->whereIn('route', ['disbursements.index', 'reports.index', 'inventory.index', 'maintenance.index', 'pos.orders'])
+            ->whereIn('route', ['disbursements.index', 'reports.index', 'maintenance.index', 'pos.orders'])
             ->values()
             ->all();
     }
