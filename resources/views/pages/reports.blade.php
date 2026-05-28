@@ -64,7 +64,7 @@
             <div class="mt-6 flex flex-col gap-3 border-t border-[#d8e1f5] pt-5 sm:flex-row sm:items-center sm:justify-between">
                 <p class="text-sm font-semibold text-[#5c6a86]">Summary computes sales minus disbursement for the selected dates.</p>
                 <div class="flex flex-col gap-2 sm:flex-row">
-                   <button type="button" id="btn-send-email" class="group flex items-center justify-center gap-2 rounded-2xl border-2 border-[#061a42] px-6 py-3 text-sm font-bold text-[#061a42] shadow transition hover:-translate-y-0.5 hover:bg-[#061a42] hover:text-white disabled:cursor-not-allowed disabled:opacity-50" {{ auth()->user()->report_email ? '' : 'disabled' }} title="{{ auth()->user()->report_email ? 'Send to ' . auth()->user()->report_email : 'Set report email in Settings first' }}">
+                   <button type="button" id="btn-send-email" class="group flex items-center justify-center gap-2 rounded-2xl border-2 border-[#061a42] px-6 py-3 text-sm font-bold text-[#061a42] shadow transition hover:-translate-y-0.5 hover:bg-[#061a42] hover:text-white">
     <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
     <span id="btn-email-text">
         
@@ -77,26 +77,29 @@
                     </button>
                 </div>
             </div>
+
+            <div class="mt-5 flex items-center gap-2 rounded-2xl bg-[#f8fbff] px-5 py-3 border border-[#d8e1f5]">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-[#5c6a86]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                <p class="text-sm font-semibold text-[#5c6a86]">This report will be emailed to the admin at <strong class="text-[#061a42]">{{ $reportRecipientEmail ?? 'not set' }}</strong>.</p>
+            </div>
         </form>
 
-        @if (auth()->user()?->role === 'admin' && auth()->user()->report_email)
+        @if ($reportRecipientEmail)
             <div class="flex items-center gap-2 rounded-2xl bg-[#f8fbff] px-5 py-3 border border-[#d8e1f5]">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-[#5c6a86]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                <p class="text-sm font-semibold text-[#5c6a86]">Reports will be emailed to: <strong class="text-[#061a42]">{{ auth()->user()->report_email }}</strong> — <a href="{{ route('settings.index') }}" class="text-blue-600 underline hover:text-blue-800">Change in Settings</a></p>
+                <p class="text-sm font-semibold text-[#5c6a86]">Admin report email: <strong class="text-[#061a42]">{{ $reportRecipientEmail }}</strong> — <a href="{{ route('settings.index') }}" class="text-blue-600 underline hover:text-blue-800">Change in Settings</a></p>
             </div>
         @endif
     </section>
 
     {{-- Hidden form for sending email --}}
-    @if (auth()->user()?->role === 'admin')
-        <form method="POST" action="{{ route('reports.email') }}" id="email-report-form" class="hidden">
-            @csrf
-            <input type="hidden" name="date_scope" id="email-date-scope">
-            <input type="hidden" name="date_from" id="email-date-from">
-            <input type="hidden" name="date_to" id="email-date-to">
-            <div id="email-report-types"></div>
-        </form>
-    @endif
+    <form method="POST" action="{{ route('reports.email') }}" id="email-report-form" class="hidden">
+        @csrf
+        <input type="hidden" name="date_scope" id="email-date-scope">
+        <input type="hidden" name="date_from" id="email-date-from">
+        <input type="hidden" name="date_to" id="email-date-to">
+        <div id="email-report-types"></div>
+    </form>
 
     <script>
         window.addEventListener('DOMContentLoaded', () => {

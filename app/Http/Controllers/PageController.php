@@ -253,6 +253,7 @@ class PageController extends Controller
             'dateRanges' => $this->dateRangeOptions(),
             'defaultDateFrom' => now()->toDateString(),
             'defaultDateTo' => now()->toDateString(),
+            'reportRecipientEmail' => $this->adminReportEmail(),
         ]);
     }
 
@@ -515,10 +516,10 @@ class PageController extends Controller
             'report_types.*' => ['in:sales,disbursement,summary'],
         ]);
 
-        $reportEmail = $request->user()->report_email;
+        $reportEmail = $this->adminReportEmail();
 
         if (! $reportEmail) {
-            return back()->withErrors(['email' => 'Please set your report email in Settings first.']);
+            return back()->withErrors(['email' => 'Please set the admin report email in Settings first.']);
         }
 
         [$from, $to] = $this->reportDateRange(
@@ -532,15 +533,21 @@ class PageController extends Controller
 
         $fileContent = $this->generateReportContent($from, $to, $reportTypes);
 
-        Mail::to($reportEmail)->send(new ReportMail(
-            filename: $filename,
-            fileContent: $fileContent,
-            dateFrom: $from->format('Y-m-d'),
-            dateTo: $to->format('Y-m-d'),
-            reportTypes: $reportTypes,
-            senderName: $request->user()->name,
-            senderEmail: $request->user()->email,
-        ));
+        try {
+            Mail::to($reportEmail)->send(new ReportMail(
+                filename: $filename,
+                fileContent: $fileContent,
+                dateFrom: $from->format('Y-m-d'),
+                dateTo: $to->format('Y-m-d'),
+                reportTypes: $reportTypes,
+                senderName: $request->user()->name,
+                senderEmail: $request->user()->email,
+            ));
+        } catch (\Throwable $e) {
+            return back()->withErrors([
+                'email' => 'Mail sending failed. Check your Gmail SMTP settings, especially the App Password, MAIL_PORT=587, and MAIL_ENCRYPTION=tls.',
+            ]);
+        }
 
         return back()->with('status', 'Report sent to ' . $reportEmail . ' successfully!');
     }
@@ -632,6 +639,13 @@ class PageController extends Controller
             ],
             default => [$today->startOfDay(), $today->endOfDay()],
         };
+    }
+
+    private function adminReportEmail(): ?string
+    {
+        $admin = User::query()->where('role', 'admin')->orderBy('id')->first();
+
+        return $admin?->report_email ?: $admin?->email;
     }
 
     private function disbursementExpenses()
