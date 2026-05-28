@@ -382,6 +382,42 @@ class PageController extends Controller
                 ];
             }
 
+            // Folding payouts: count folds per staff within the range and value each fold at 5.00
+            $foldRate = 5.00;
+            $foldOrders = LaundryOrder::query()
+                ->whereNotNull('folded_by')
+                ->whereBetween('updated_at', [$from, $to])
+                ->get()
+                ->groupBy('folded_by');
+
+            $foldPayoutTotal = 0.0;
+            if ($foldOrders->isNotEmpty()) {
+                $disbursementRows[] = [];
+                $disbursementRows[] = ['Folding payouts'];
+                $disbursementRows[] = ['Staff', 'Folds', 'Rate', 'Total'];
+
+                foreach ($foldOrders as $staffId => $group) {
+                    $count = $group->count();
+                    $user = User::query()->find($staffId);
+                    $name = $user?->name ?? ('Staff #'.$staffId);
+                    $total = $count * $foldRate;
+                    $foldPayoutTotal += $total;
+
+                    $disbursementRows[] = [
+                        $name,
+                        $count,
+                        number_format($foldRate, 2, '.', ''),
+                        number_format($total, 2, '.', ''),
+                    ];
+                }
+
+                $disbursementRows[] = [];
+                $disbursementRows[] = ['Folding payouts total', '', '', number_format($foldPayoutTotal, 2, '.', '')];
+
+                // Add fold payouts into the disbursement total
+                $disbursementTotal += $foldPayoutTotal;
+            }
+
             $disbursementRows[] = ['Disbursement total', '', '', number_format($disbursementTotal, 2, '.', '')];
             $worksheets['Disbursement Reports'] = $disbursementRows;
         }

@@ -367,7 +367,7 @@
                                                     @if ($nextStep['key'] === 'fold')
                                                         @php $staffList = $staff ?? \App\Models\User::query()->where('role','staff')->orderBy('name')->get(); @endphp
                                                         <label class="mb-2 block text-sm font-bold text-[#5c6a86]">Assign staff</label>
-                                                        <select name="assigned_staff_id" class="mb-3 w-full rounded-2xl border border-[#c8d3ea] bg-white px-3 py-2 text-sm font-semibold text-[#061a42] outline-none focus:border-[#08285f]">
+                                                        <select name="assigned_staff_id" class="mb-3 w-full rounded-2xl border border-[#c8d3ea] bg-white px-2 py-1.5 text-xs font-medium text-[#061a42] outline-none focus:border-[#08285f]">
                                                             <option value="">(unassigned)</option>
                                                             @foreach ($staffList as $st)
                                                                 <option value="{{ $st->id }}">{{ $st->name }}</option>
