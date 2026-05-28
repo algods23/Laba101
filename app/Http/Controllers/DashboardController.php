@@ -56,6 +56,13 @@ class DashboardController extends Controller
             ->latest()
             ->get();
 
+        $currentBranch = auth()->user()->branch ?? null;
+        $staffQuery = \App\Models\User::query()->where('role', 'staff');
+        if ($currentBranch) {
+            $staffQuery->where('branch', $currentBranch);
+        }
+        $staffList = $staffQuery->orderBy('name')->get();
+
         return view('pages.pos-orders', [
             'customers' => Customer::query()->orderBy('name')->get(),
             'services' => LaundryService::query()
@@ -70,6 +77,7 @@ class DashboardController extends Controller
                 ->get(),
             'itemCategories' => ItemCategory::query()->where('is_active', true)->orderBy('name')->get(),
             'orders' => $orders,
+            'staff' => $staffList,
             'stats' => [
                 'openQueue' => LaundryOrder::query()->whereNotIn('status', ['claimed'])->count(),
                 'received' => LaundryOrder::query()->where('status', 'received')->count(),
@@ -179,10 +187,24 @@ class DashboardController extends Controller
         $completed = array_merge($order->workflow_completed ?? [], [$next['key']]);
         $completed = LaundryOrder::normalizeWorkflowCompleted($stepKeys, $completed);
 
-        $order->update([
+        $updateData = [
             'workflow_completed' => $completed,
             'status' => $order->syncStatusFromWorkflow($completed),
-        ]);
+        ];
+
+        // If advancing to fold, optionally record who folded the order
+        if ($next['key'] === 'fold') {
+            request()->validate([
+                'assigned_staff_id' => ['nullable', 'integer', 'exists:users,id'],
+            ]);
+
+            $assigned = request('assigned_staff_id');
+            if ($assigned) {
+                $updateData['folded_by'] = $assigned;
+            }
+        }
+
+        $order->update($updateData);
 
         return redirect()->route('pos.orders')->with('status', $order->actionLabelForStep($next['key']).' — done.');
     }

@@ -78,18 +78,8 @@
                 </div>
             </div>
 
-            <div class="mt-5 flex items-center gap-2 rounded-2xl bg-[#f8fbff] px-5 py-3 border border-[#d8e1f5]">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-[#5c6a86]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                <p class="text-sm font-semibold text-[#5c6a86]">This report will be emailed to the admin at <strong class="text-[#061a42]">{{ $reportRecipientEmail ?? 'not set' }}</strong>.</p>
-            </div>
+           
         </form>
-
-        @if ($reportRecipientEmail)
-            <div class="flex items-center gap-2 rounded-2xl bg-[#f8fbff] px-5 py-3 border border-[#d8e1f5]">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-[#5c6a86]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                <p class="text-sm font-semibold text-[#5c6a86]">Admin report email: <strong class="text-[#061a42]">{{ $reportRecipientEmail }}</strong> — <a href="{{ route('settings.index') }}" class="text-blue-600 underline hover:text-blue-800">Change in Settings</a></p>
-            </div>
-        @endif
     </section>
 
     {{-- Hidden form for sending email --}}
@@ -116,7 +106,20 @@
                     if (!selectedRange || !scopeInput.checked) return;
 
                     fromInput.value = selectedRange.from;
-                    toInput.value = selectedRange.to;
+
+                    // If the user selected "today" (Current), set "to" to the next day
+                    if (scopeInput.value === 'today') {
+                        try {
+                            const fromDate = new Date(selectedRange.from);
+                            const next = new Date(fromDate);
+                            next.setDate(next.getDate() + 1);
+                            toInput.value = next.toISOString().slice(0,10);
+                        } catch (e) {
+                            toInput.value = selectedRange.to;
+                        }
+                    } else {
+                        toInput.value = selectedRange.to;
+                    }
                 });
             });
 

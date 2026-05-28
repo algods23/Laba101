@@ -38,6 +38,7 @@ class LaundryOrder extends Model
         'payment_reference',
         'due_at',
         'notes',
+        'folded_by',
         'branch',
     ];
 
@@ -89,6 +90,11 @@ class LaundryOrder extends Model
                 ? $this->service->drying_minutes.' mins drying'
                 : null;
             $steps[] = ['key' => 'dry', 'label' => 'Dry', 'hint' => $dryHint];
+        }
+
+        // If the service includes folding, add a Fold step after drying (or before Ready)
+        if (in_array('Fold', $includes, true)) {
+            $steps[] = ['key' => 'fold', 'label' => 'Fold', 'hint' => null];
         }
 
         $steps[] = ['key' => 'ready', 'label' => 'Ready for pickup', 'hint' => null];
@@ -163,6 +169,7 @@ class LaundryOrder extends Model
             'wash' => 'Start washing',
             'extras' => 'Apply extra services',
             'dry' => 'Start drying',
+            'fold' => 'Start folding',
             'ready' => 'Ready for pickup',
             'claimed' => 'Mark claimed',
             default => 'Complete step',
@@ -197,6 +204,11 @@ class LaundryOrder extends Model
     public function service(): BelongsTo
     {
         return $this->belongsTo(LaundryService::class, 'service_id');
+    }
+
+    public function foldedBy(): BelongsTo
+    {
+        return $this->belongsTo(\App\Models\User::class, 'folded_by');
     }
 
     public function itemCategory(): BelongsTo
