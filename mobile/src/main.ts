@@ -179,6 +179,7 @@ async function loadData() {
   const allStaff = await listAllStaff();
   const customers = await listCustomers();
   const services = await listServices();
+  const allServices = await listAllServices();
   const categories = await listItemCategories();
   const orders = await listOrders(branch);
   const payments = await listPayments();
@@ -190,7 +191,7 @@ async function loadData() {
   const foldRate = await getFoldRate();
   const reportEmail = await getSetting('report_email');
 
-  return { branch, staff, allStaff, customers, services, categories, orders, payments, foldLogs, expenses, sales, machines, subcleanings, foldRate, reportEmail: reportEmail ?? '' };
+  return { branch, staff, allStaff, customers, services, allServices, categories, orders, payments, foldLogs, expenses, sales, machines, subcleanings, foldRate, reportEmail: reportEmail ?? '' };
 }
 
 async function render() {
@@ -271,7 +272,7 @@ async function render() {
         ${state.tab === 'dashboard' ? renderDashboard({ openQueue, readyPickup, customerCount: data.customers.length, paidToday, orders: data.orders }) : ''}
         ${state.tab === 'orders' ? renderOrders(data.orders, data.customers, data.services, data.categories, data.staff, data.payments, data.branch) : ''}
         ${state.tab === 'customers' ? renderCustomers(data.customers, data.orders) : ''}
-        ${state.tab === 'pricing' ? renderPricing(data.services, data.categories) : ''}
+        ${state.tab === 'pricing' ? renderPricing(data.allServices, data.categories) : ''}
         ${state.tab === 'disbursements' ? renderDisbursements(data.expenses, data.sales) : ''}
         ${state.tab === 'reports' ? renderReports(data.orders, data.sales, data.expenses, data.foldRate, salesTotal, disbursementTotal, profit) : ''}
         ${state.tab === 'inventory' ? renderInventory(data.services, data.categories) : ''}
@@ -284,7 +285,7 @@ async function render() {
 
   bindNavigation();
   bindOrderForms(data);
-  bindPricingForms(data.services);
+  bindPricingForms(data.allServices);
   bindDisbursementForms();
   bindReportActions(data.orders, data.sales, data.expenses, data.foldRate);
   bindMaintenanceForms();
@@ -1332,14 +1333,22 @@ function bindReportActions(orders: OrderRow[], sales: DailySale[], expenses: Dis
       return { fileName: file.name, uri: '' };
     }
 
+    await Filesystem.requestPermissions();
     const html = await file.text();
+    const folder = 'Laba101 Reports';
+    const path = `${folder}/${file.name}`;
+    await Filesystem.mkdir({
+      path: folder,
+      directory: Directory.Documents,
+      recursive: true,
+    });
     await Filesystem.writeFile({
-      path: file.name,
+      path,
       data: html,
       directory: Directory.Documents,
       encoding: Encoding.UTF8,
     });
-    const { uri } = await Filesystem.getUri({ path: file.name, directory: Directory.Documents });
+    const { uri } = await Filesystem.getUri({ path, directory: Directory.Documents });
     return { fileName: file.name, uri };
   };
   const downloadReport = () => {

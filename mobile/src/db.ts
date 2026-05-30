@@ -168,14 +168,14 @@ const seedServices: LaundryService[] = [
   serviceSeed(1, 'Drop-off', 'Wash, dry and fold.', 'Drop-Off', 'order', 185, 8, 40, ['Wash', 'Dry', 'Fold'], 0, 24),
   serviceSeed(2, 'Full Service', 'Wash, dry, fold, detergent and Fabcon.', 'Full Service', 'order', 200, 8, 40, ['Wash', 'Dry', 'Fold', 'Detergent', 'Fabcon'], 0, 24),
   serviceSeed(3, 'Self Service Wash', 'Max of 8kg per load.', 'Self Service', 'order', 60, 8, null, ['Wash'], 0, 1),
-  serviceSeed(4, 'Self Service Dry', 'Regular 40 mins drying time.', 'Self Service', 'order', 70, 8, 40, ['Dry'], 0, 1),
+  serviceSeed(4, 'Self Service Dry', 'Regular time: 40 mins drying time.', 'Self Service', 'order', 70, 8, 40, ['Dry'], 0, 1),
   serviceSeed(5, 'Dry Only', 'Standard drying rate.', 'Dry Only', 'order', 70, 8, 40, ['Dry'], 0, 1),
   serviceSeed(6, 'Additional Dry 10 mins', 'Additional drying time.', 'Dry Only', 'order', 30, 8, 10, ['Dry'], 0, 1),
   serviceSeed(7, 'Additional Dry 20 mins', 'Additional drying time.', 'Dry Only', 'order', 50, 8, 20, ['Dry'], 0, 1),
   serviceSeed(8, 'Additional Dry 40 mins', 'Additional drying time.', 'Dry Only', 'order', 70, 8, 40, ['Dry'], 0, 1),
-  serviceSeed(9, 'Additional Zonrox', 'Extra bleach add-on per load.', 'Add-on', 'addon', 25, 0, null, ['Zonrox'], 0, 0),
-  serviceSeed(10, 'Additional Fabcon', 'Extra fabric conditioner add-on per load.', 'Add-on', 'addon', 25, 0, null, ['Fabcon'], 0, 0),
-  serviceSeed(11, 'Comforter / Bulky Load', 'Comforter and bulky item service.', 'Comforter', 'order', 200, 8, 40, ['Wash', 'Dry', 'Fold'], 0, 24),
+  serviceSeed(9, 'Additional Zonrox', 'Extra Zonrox bleach add-on per load.', 'Add-on', 'addon', 25, 0, null, ['Zonrox'], 0, 0),
+  serviceSeed(10, 'Additional Fabcon', 'Extra Fabcon fabric conditioner add-on per load.', 'Add-on', 'addon', 25, 0, null, ['Fabcon'], 0, 0),
+  serviceSeed(11, 'Comforter / Bulky Load', 'Comforter 4kg max per load. Thin blankets, bedsheets, bath towels, pillow cases and curtains: 6kg max per load.', 'Comforter', 'order', 200, 8, 40, ['Wash', 'Dry', 'Fold'], 0, 24),
 ];
 
 const seedItemCategories: ItemCategory[] = [
@@ -186,6 +186,32 @@ const seedItemCategories: ItemCategory[] = [
   { id: 5, name: 'Bath Towels', maxKg: 6, additionalFee: 0, isActive: 1 },
   { id: 6, name: 'Curtains', maxKg: 6, additionalFee: 0, isActive: 1 },
 ];
+
+async function syncSeedLaundryCatalog(db: SQLiteDBConnection) {
+  for (const service of seedServices) {
+    const existing = await db.query('SELECT id FROM laundry_services WHERE id = ?', [service.id]);
+    if ((existing.values ?? []).length > 0) {
+      await db.run(
+        'UPDATE laundry_services SET name = ?, description = ?, category = ?, serviceType = ?, price = ?, maxKg = ?, dryingMinutes = ?, includes = ?, additionalCharge = ?, turnaroundHours = ?, isActive = COALESCE(isActive, ?) WHERE id = ?',
+        [service.name, service.description, service.category, service.serviceType, service.price, service.maxKg, service.dryingMinutes, JSON.stringify(service.includes), service.additionalCharge, service.turnaroundHours, service.isActive, service.id],
+      );
+    } else {
+      await db.run('INSERT INTO laundry_services (id, name, description, category, serviceType, price, maxKg, dryingMinutes, includes, additionalCharge, turnaroundHours, isActive) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [service.id, service.name, service.description, service.category, service.serviceType, service.price, service.maxKg, service.dryingMinutes, JSON.stringify(service.includes), service.additionalCharge, service.turnaroundHours, service.isActive]);
+    }
+  }
+
+  for (const category of seedItemCategories) {
+    const existing = await db.query('SELECT id FROM item_categories WHERE id = ?', [category.id]);
+    if ((existing.values ?? []).length > 0) {
+      await db.run(
+        'UPDATE item_categories SET name = ?, maxKg = ?, additionalFee = ?, isActive = COALESCE(isActive, ?) WHERE id = ?',
+        [category.name, category.maxKg, category.additionalFee, category.isActive, category.id],
+      );
+    } else {
+      await db.run('INSERT INTO item_categories (id, name, maxKg, additionalFee, isActive) VALUES (?, ?, ?, ?, ?)', [category.id, category.name, category.maxKg, category.additionalFee, category.isActive]);
+    }
+  }
+}
 
 const seedOrders: OrderRow[] = [
   {
@@ -321,7 +347,7 @@ async function addColumnIfMissing(db: SQLiteDBConnection, table: string, column:
 
 async function ensureSchema() {
   if (!Capacitor.isNativePlatform()) {
-    if (!localStorage.getItem(browserKey('seeded_v3'))) {
+    if (!localStorage.getItem(browserKey('seeded_v4'))) {
       writeBrowser('staff', seedStaff);
       writeBrowser('customers', seedCustomers);
       writeBrowser('services', seedServices);
@@ -334,7 +360,7 @@ async function ensureSchema() {
       writeBrowser('machines', seedMachines);
       writeBrowser('subcleanings', []);
       writeBrowser('settings', seedSettings);
-      writeBrowser('seeded_v3', true);
+      writeBrowser('seeded_v4', true);
     }
     return;
   }
@@ -437,6 +463,8 @@ async function ensureSchema() {
     for (const machine of seedMachines) await db.run('INSERT INTO machines (id, machineName, machineType, status, branch) VALUES (?, ?, ?, ?, ?)', [machine.id, machine.machineName, machine.machineType, machine.status, machine.branch]);
     for (const setting of seedSettings) await db.run('INSERT INTO settings (key, value) VALUES (?, ?)', [setting.key, setting.value]);
   }
+
+  await syncSeedLaundryCatalog(db);
 }
 
 async function insertNativeOrder(db: SQLiteDBConnection, order: OrderRow) {
