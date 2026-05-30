@@ -28,7 +28,7 @@
                     @csrf
                     <span class="text-[#5c6a86]">Branch</span>
                     <select name="branch" onchange="this.form.submit()" class="bg-transparent text-[#061a42] outline-none">
-                        @foreach(['Main Store', 'Mintal', 'Gensan City'] as $branchOption)
+                        @foreach(['Main Store', 'Mintal Branch', 'Gensan Branch'] as $branchOption)
                             <option value="{{ $branchOption }}" {{ session('active_branch', 'Main Store') === $branchOption ? 'selected' : '' }}>{{ $branchOption }}</option>
                         @endforeach
                     </select>

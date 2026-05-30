@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Laba101</string>
+    <string name="title_activity_main">Laba101</string>
+    <string name="package_name">com.laba101.mobile</string>
+    <string name="custom_url_scheme">com.laba101.mobile</string>
+</resources>

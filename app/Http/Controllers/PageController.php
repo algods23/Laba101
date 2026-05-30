@@ -465,7 +465,7 @@ class PageController extends Controller
         return view('pages.staff', [
             'staffMembers' => $staffMembers,
             'currentBranch' => $branch,
-            'branches' => ['Main Store', 'Mintal', 'Gensan City'],
+            'branches' => ['Main Store', 'Mintal Branch', 'Gensan Branch'],
         ]);
     }
 
@@ -475,7 +475,7 @@ class PageController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'email', 'max:255', 'unique:users'],
             'password' => ['required', 'string', 'min:8'],
-            'branch' => ['required', 'string', 'in:Main Store,Mintal,Gensan City'],
+            'branch' => ['required', 'string', 'in:Main Store,Mintal Branch,Gensan Branch'],
         ]);
 
         User::query()->create([
@@ -494,7 +494,7 @@ class PageController extends Controller
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'email', 'max:255', 'unique:users,email,'.$user->id],
-            'branch' => ['required', 'string', 'in:Main Store,Mintal,Gensan City'],
+            'branch' => ['required', 'string', 'in:Main Store,Mintal Branch,Gensan Branch'],
         ]);
 
         if ($request->filled('password')) {
@@ -510,7 +510,7 @@ class PageController extends Controller
     public function setBranch(Request $request): RedirectResponse
     {
         $validated = $request->validate([
-            'branch' => ['required', 'string', 'in:Main Store,Mintal,Gensan City'],
+            'branch' => ['required', 'string', 'in:Main Store,Mintal Branch,Gensan Branch'],
         ]);
         session(['active_branch' => $validated['branch']]);
         return back();

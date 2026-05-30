@@ -159,11 +159,11 @@
                         <p class="text-sm font-bold text-[#061a42]">Demo accounts</p>
                         <div class="mt-3 space-y-3">
                             @foreach ($demoAccounts as $account)
-                                <div class="rounded-xl bg-white px-4 py-3 text-sm text-[#4b5874] shadow-sm">
+                                <button type="button" data-demo-email="{{ $account['email'] }}" data-demo-password="{{ $account['password'] }}" class="block w-full rounded-xl bg-white px-4 py-3 text-left text-sm text-[#4b5874] shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
                                     <p class="font-semibold text-[#061a42]">{{ $account['role'] }}</p>
                                     <p class="mt-1">{{ $account['email'] }}</p>
                                     <p class="mt-1">Password: {{ $account['password'] }}</p>
-                                </div>
+                                </button>
                             @endforeach
                         </div>
                     </aside>
@@ -172,6 +172,13 @@
         </main>
 
         <script>
+            document.querySelectorAll('[data-demo-email]').forEach((button) => {
+                button.addEventListener('click', () => {
+                    document.getElementById('email').value = button.dataset.demoEmail;
+                    document.getElementById('password').value = button.dataset.demoPassword;
+                });
+            });
+
             // Prevents double submits and gives a clear touch-friendly loading response.
             document.getElementById('login-form')?.addEventListener('submit', function () {
                 const button = document.getElementById('login-button');

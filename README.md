@@ -57,3 +57,9 @@ If you discover a security vulnerability within Laravel, please send an e-mail t
 ## License
 
 The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+
+## Android Mobile Scaffold
+
+This repository now includes a separate offline mobile scaffold in [mobile/README.md](mobile/README.md) for building an Android APK with Capacitor and SQLite.
+
+Important: Laravel/PHP does not run inside the APK itself. The mobile folder is an offline-first client shell that stores data on the Android device. See [mobile/README.md](mobile/README.md) for the build commands and setup files.
