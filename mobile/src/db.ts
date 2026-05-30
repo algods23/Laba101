@@ -606,10 +606,10 @@ export async function upsertCustomer(input: { id?: number; name: string; phone?:
 
 export async function listServices(type?: 'order' | 'addon'): Promise<LaundryService[]> {
   if (!Capacitor.isNativePlatform()) {
-    return readBrowser<LaundryService[]>('services', seedServices).filter((service) => service.isActive && (!type || service.serviceType === type));
+    return readBrowser<LaundryService[]>('services', seedServices).filter((service) => !type || service.serviceType === type);
   }
   const db = await ensureNativeDb();
-  const result = await db.query(`SELECT id, name, description, category, serviceType, price, maxKg, dryingMinutes, includes, additionalCharge, turnaroundHours, isActive FROM laundry_services WHERE isActive = 1 ${type ? 'AND serviceType = ?' : ''} ORDER BY name ASC`, type ? [type] : []);
+  const result = await db.query(`SELECT id, name, description, category, serviceType, price, maxKg, dryingMinutes, includes, additionalCharge, turnaroundHours, isActive FROM laundry_services ${type ? 'WHERE serviceType = ?' : ''} ORDER BY name ASC`, type ? [type] : []);
   return (result.values ?? []).map((row) => ({ ...(row as LaundryService), includes: parseJson<string[]>((row as { includes?: string }).includes, []) }));
 }
 
@@ -642,11 +642,13 @@ export async function saveService(input: Omit<LaundryService, 'id'> & { id?: num
 export async function deleteService(id: number) {
   if (!Capacitor.isNativePlatform()) {
     const items = readBrowser<LaundryService[]>('services', seedServices);
-    writeBrowser('services', items.filter(s => s.id !== id));
+    const service = items.find((item) => item.id === id);
+    if (service) service.isActive = 0;
+    writeBrowser('services', items);
     return;
   }
   const db = await ensureNativeDb();
-  await db.run('DELETE FROM laundry_services WHERE id = ?', [id]);
+  await db.run('UPDATE laundry_services SET isActive = 0 WHERE id = ?', [id]);
 }
 
 export async function listItemCategories(): Promise<ItemCategory[]> {

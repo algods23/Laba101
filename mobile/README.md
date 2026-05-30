@@ -90,9 +90,16 @@ mobile\android\app\build\outputs\apk\debug\app-debug.apk
 Enable USB debugging on the Android device, connect it, then run:
 
 ```powershell
-adb devices
-adb install -r mobile\android\app\build\outputs\apk\debug\app-debug.apk
+.\deploy.ps1
 ```
+
+If you already built the APK and only want to reinstall or update it on the connected device, run:
+
+```powershell
+.\deploy.ps1 -SkipBuild
+```
+
+The deploy script uses `adb install -r -d` so it updates the installed app and relaunches it after install.
 
 ## Build Release APK
 Run from `mobile/`:

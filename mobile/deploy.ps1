@@ -9,6 +9,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$PackageName = "com.laba101.mobile"
 
 # ── Locate this script's directory (mobile/) ─────────────────
 $MobileDir  = $PSScriptRoot
@@ -53,6 +54,30 @@ function Step($label, [scriptblock]$block) {
     Write-Host ""
 }
 
+function Get-ConnectedDeviceId {
+    $deviceLines = & $AdbPath devices | Select-Object -Skip 1 | Where-Object { $_ -match '\s+device$' }
+    if (-not $deviceLines) {
+        return $null
+    }
+
+    if ($deviceLines.Count -gt 1) {
+        Write-Host "Multiple USB devices detected; using the first one." -ForegroundColor Yellow
+    }
+
+    return ($deviceLines | Select-Object -First 1).Split()[0]
+}
+
+$DeviceId = Get-ConnectedDeviceId
+if (-not $DeviceId) {
+    Write-Host "No Android device found. Enable USB debugging and reconnect the phone." -ForegroundColor Red
+    exit 1
+}
+
+Write-Host "  Device     : $DeviceId"
+Write-Host ""
+
+$AdbDeviceArgs = @('-s', $DeviceId)
+
 # ── Step 1: Vite build ────────────────────────────────────────
 if (-not $SkipBuild) {
     Step "npm run build" { npm run build }
@@ -72,8 +97,18 @@ Step "gradlew assembleDebug" {
 }
 
 # ── Step 4: ADB install ───────────────────────────────────────
-Step "adb install -r app-debug.apk" {
-    & $AdbPath install -r $APK
+Step "adb install -r -d app-debug.apk" {
+    & $AdbPath @AdbDeviceArgs install -r -d $APK
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  Update install failed; uninstalling existing app and retrying..." -ForegroundColor Yellow
+        & $AdbPath @AdbDeviceArgs uninstall $PackageName | Out-Null
+        & $AdbPath @AdbDeviceArgs install -r -d $APK
+    }
+}
+
+# ── Step 5: Launch app ───────────────────────────────────────
+Step "adb launch app" {
+    & $AdbPath @AdbDeviceArgs shell monkey -p $PackageName -c android.intent.category.LAUNCHER 1
 }
 
 # ── Done! ─────────────────────────────────────────────────────
@@ -83,4 +118,5 @@ Write-Host "  npm run build    -> OK                  " -ForegroundColor Green
 Write-Host "  cap sync android -> OK                  " -ForegroundColor Green
 Write-Host "  assembleDebug    -> OK                  " -ForegroundColor Green
 Write-Host "  adb install      -> OK                  " -ForegroundColor Green
+Write-Host "  adb launch       -> OK                  " -ForegroundColor Green
 Write-Host "==========================================" -ForegroundColor Green

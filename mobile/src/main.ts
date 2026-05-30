@@ -1,4 +1,6 @@
 import './style.css';
+import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
 import {
   advanceOrder,
   authenticateUser,
@@ -31,7 +33,6 @@ import {
   saveSubcleaning,
   setSetting,
   workflowSteps,
-  deleteService,
   getSetting,
   updateMachine,
   updateStaff,
@@ -379,8 +380,8 @@ function renderDashboard(metrics: { openQueue: number; readyPickup: number; cust
 }
 
 function renderOrders(orders: OrderRow[], customers: Customer[], services: LaundryService[], categories: ItemCategory[], staff: Staff[], payments: Payment[], branch: string) {
-  const orderServices = services.filter((service) => service.serviceType === 'order');
-  const addons = services.filter((service) => service.serviceType === 'addon');
+  const orderServices = services.filter((service) => service.serviceType === 'order' && service.isActive);
+  const addons = services.filter((service) => service.serviceType === 'addon' && service.isActive);
   const receipt = state.receiptOrderId ? orders.find((order) => order.id === state.receiptOrderId) : null;
 
   // Only show customers who have a prior order in this branch
@@ -600,7 +601,6 @@ function renderPricing(services: LaundryService[], categories: ItemCategory[]) {
           <div class="row-actions">
             <button class="secondary edit-service-btn" data-id="${service.id}">Edit</button>
             ${service.isActive ? `<button class="secondary deactivate-service-btn" data-id="${service.id}">Deactivate</button>` : `<button class="secondary activate-service-btn" data-id="${service.id}">Activate</button>`}
-            <button class="secondary delete-service-btn" data-id="${service.id}">Delete</button>
           </div></div>`).join('')}
         </div>
         <div class="section-divider"></div>
@@ -1208,15 +1208,6 @@ function bindPricingForms(services: LaundryService[]) {
     });
   });
 
-  document.querySelectorAll<HTMLButtonElement>('.delete-service-btn').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      if (confirm('Are you sure you want to delete this service?')) {
-        await deleteService(Number(btn.dataset.id));
-        await render();
-      }
-    });
-  });
-
   document.querySelector<HTMLFormElement>('#category-form')?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const fd = new FormData(event.currentTarget);
@@ -1335,6 +1326,22 @@ function bindReportActions(orders: OrderRow[], sales: DailySale[], expenses: Dis
     const fileName = `laba101-report-${range.from}-to-${range.to}.xls`;
     return new File([html], fileName, { type: 'application/vnd.ms-excel' });
   };
+  const saveReportToDevice = async () => {
+    const file = reportFile();
+    if (!Capacitor.isNativePlatform()) {
+      return { fileName: file.name, uri: '' };
+    }
+
+    const html = await file.text();
+    await Filesystem.writeFile({
+      path: file.name,
+      data: html,
+      directory: Directory.Documents,
+      encoding: Encoding.UTF8,
+    });
+    const { uri } = await Filesystem.getUri({ path: file.name, directory: Directory.Documents });
+    return { fileName: file.name, uri };
+  };
   const downloadReport = () => {
     const html = excelFromRows(reportRows());
     const range = selectedDateRange();
@@ -1355,22 +1362,37 @@ function bindReportActions(orders: OrderRow[], sales: DailySale[], expenses: Dis
     if (btn) { btn.disabled = true; btn.textContent = mode === 'export' ? 'Exporting...' : 'Sending...'; }
     try {
       if (mode === 'export') {
-        const fileName = downloadReport();
-        alert(`Report saved: ${fileName}`);
+        if (Capacitor.isNativePlatform()) {
+          const saved = await saveReportToDevice();
+          alert(`Report saved to device storage: ${saved.fileName}`);
+        } else {
+          const fileName = downloadReport();
+          alert(`Report saved: ${fileName}`);
+        }
       } else {
         const email = await getSetting('report_email') || '';
         if (!email) {
           alert('Please configure a report email in Settings first.');
           return;
         }
-        // Download report first so the user can attach it
-        const fileName = downloadReport();
         const range = selectedDateRange();
         const title = `Laba101 report ${range.from} to ${range.to}`;
-        const body = `Hi,\n\nPlease find the attached Laba101 report file: ${fileName}\n\nDate range: ${range.from} to ${range.to}`;
-        const mailto = `mailto:${email}?subject=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}`;
-        setTimeout(() => { window.location.href = mailto; }, 800);
-        alert(`Report downloaded as "${fileName}".\nYour email app will open — please attach the file and send.`);
+        if (Capacitor.isNativePlatform()) {
+          const saved = await saveReportToDevice();
+          await Share.share({
+            title,
+            text: `Please find the attached Laba101 report file: ${saved.fileName}`,
+            files: [saved.uri],
+            dialogTitle: 'Send report via email',
+          });
+          alert(`Report saved and shared as "${saved.fileName}".`);
+        } else {
+          const fileName = downloadReport();
+          const body = `Hi,\n\nPlease find the attached Laba101 report file: ${fileName}\n\nDate range: ${range.from} to ${range.to}`;
+          const mailto = `mailto:${email}?subject=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}`;
+          setTimeout(() => { window.location.href = mailto; }, 800);
+          alert(`Report downloaded as "${fileName}".\nYour email app will open — please attach the file and send.`);
+        }
       }
     } catch (err) {
       alert('Failed: ' + String(err));
