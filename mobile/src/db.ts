@@ -187,6 +187,23 @@ const seedItemCategories: ItemCategory[] = [
   { id: 6, name: 'Curtains', maxKg: 6, additionalFee: 0, isActive: 1 },
 ];
 
+function syncBrowserSeedRows<T extends { id: number; isActive: number }>(key: string, seedRows: T[]) {
+  const currentRows = readBrowser<T[]>(key, []);
+  const rowsById = new Map(currentRows.map((row) => [row.id, row]));
+  const mergedRows = seedRows.map((seedRow) => {
+    const existing = rowsById.get(seedRow.id);
+    return existing ? { ...seedRow, ...existing, isActive: existing.isActive ?? seedRow.isActive } : seedRow;
+  });
+  if (currentRows.length !== mergedRows.length || mergedRows.some((row, index) => row.id !== currentRows[index]?.id || JSON.stringify(row) !== JSON.stringify(currentRows[index]))) {
+    writeBrowser(key, mergedRows);
+  }
+}
+
+async function syncBrowserSeedLaundryCatalog() {
+  syncBrowserSeedRows('services', seedServices);
+  syncBrowserSeedRows('item_categories', seedItemCategories);
+}
+
 async function syncSeedLaundryCatalog(db: SQLiteDBConnection) {
   for (const service of seedServices) {
     const existing = await db.query('SELECT id FROM laundry_services WHERE id = ?', [service.id]);
@@ -347,7 +364,7 @@ async function addColumnIfMissing(db: SQLiteDBConnection, table: string, column:
 
 async function ensureSchema() {
   if (!Capacitor.isNativePlatform()) {
-    if (!localStorage.getItem(browserKey('seeded_v4'))) {
+    if (!localStorage.getItem(browserKey('seeded_v4')) && !localStorage.getItem(browserKey('services')) && !localStorage.getItem(browserKey('staff'))) {
       writeBrowser('staff', seedStaff);
       writeBrowser('customers', seedCustomers);
       writeBrowser('services', seedServices);
@@ -362,6 +379,8 @@ async function ensureSchema() {
       writeBrowser('settings', seedSettings);
       writeBrowser('seeded_v4', true);
     }
+    await syncBrowserSeedLaundryCatalog();
+    if (!localStorage.getItem(browserKey('seeded_v4'))) writeBrowser('seeded_v4', true);
     return;
   }
 
@@ -638,6 +657,11 @@ export async function listServices(type?: 'order' | 'addon'): Promise<LaundrySer
   }
   const db = await ensureNativeDb();
   const result = await db.query(`SELECT id, name, description, category, serviceType, price, maxKg, dryingMinutes, includes, additionalCharge, turnaroundHours, isActive FROM laundry_services ${type ? 'WHERE serviceType = ?' : ''} ORDER BY name ASC`, type ? [type] : []);
+  if ((result.values ?? []).length === 0) {
+    await syncSeedLaundryCatalog(db);
+    const repaired = await db.query(`SELECT id, name, description, category, serviceType, price, maxKg, dryingMinutes, includes, additionalCharge, turnaroundHours, isActive FROM laundry_services ${type ? 'WHERE serviceType = ?' : ''} ORDER BY name ASC`, type ? [type] : []);
+    return (repaired.values ?? []).map((row) => ({ ...(row as LaundryService), includes: parseJson<string[]>((row as { includes?: string }).includes, []) }));
+  }
   return (result.values ?? []).map((row) => ({ ...(row as LaundryService), includes: parseJson<string[]>((row as { includes?: string }).includes, []) }));
 }
 
@@ -647,6 +671,11 @@ export async function listAllServices(): Promise<LaundryService[]> {
   }
   const db = await ensureNativeDb();
   const result = await db.query('SELECT id, name, description, category, serviceType, price, maxKg, dryingMinutes, includes, additionalCharge, turnaroundHours, isActive FROM laundry_services ORDER BY name ASC');
+  if ((result.values ?? []).length === 0) {
+    await syncSeedLaundryCatalog(db);
+    const repaired = await db.query('SELECT id, name, description, category, serviceType, price, maxKg, dryingMinutes, includes, additionalCharge, turnaroundHours, isActive FROM laundry_services ORDER BY name ASC');
+    return (repaired.values ?? []).map((row) => ({ ...(row as LaundryService), includes: parseJson<string[]>((row as { includes?: string }).includes, []) }));
+  }
   return (result.values ?? []).map((row) => ({ ...(row as LaundryService), includes: parseJson<string[]>((row as { includes?: string }).includes, []) }));
 }
 
@@ -683,6 +712,11 @@ export async function listItemCategories(): Promise<ItemCategory[]> {
   if (!Capacitor.isNativePlatform()) return readBrowser<ItemCategory[]>('item_categories', seedItemCategories).filter((item) => item.isActive);
   const db = await ensureNativeDb();
   const result = await db.query('SELECT id, name, maxKg, additionalFee, isActive FROM item_categories WHERE isActive = 1 ORDER BY name ASC');
+  if ((result.values ?? []).length === 0) {
+    await syncSeedLaundryCatalog(db);
+    const repaired = await db.query('SELECT id, name, maxKg, additionalFee, isActive FROM item_categories WHERE isActive = 1 ORDER BY name ASC');
+    return (repaired.values ?? []) as ItemCategory[];
+  }
   return (result.values ?? []) as ItemCategory[];
 }
 

@@ -14,6 +14,7 @@ import {
   getFoldRate,
   initOfflineStore,
   listAllStaff,
+  listAllServices,
   listCustomers,
   listDailySales,
   listExpenses,
@@ -78,6 +79,8 @@ const state = {
   dailyReportTab: 'expenses' as 'expenses' | 'sales',
   maintenanceTab: 'cleaning' as 'cleaning' | 'machines',
 };
+
+const serviceIncludeOptions = ['Wash', 'Dry', 'Fold', 'Detergent', 'Fabcon', 'Zonrox'] as const;
 
 const sessionKey = 'laba101-mobile-session';
 
@@ -573,10 +576,11 @@ function renderPricing(services: LaundryService[], categories: ItemCategory[]) {
             <label>Max KG<input name="maxKg" type="number" min="0" step="0.01" value="8" /></label>
             <label>Drying mins<input name="dryingMinutes" type="number" min="0" step="1" /></label>
           </div>
-          <div class="form-row">
-            <label>Includes<input name="includes" placeholder="Wash,Dry,Fold" /></label>
-            <label>Turnaround hours<input name="turnaroundHours" type="number" min="0" step="1" value="24" /></label>
-          </div>
+          <fieldset class="check-grid">
+            <legend>Includes</legend>
+            ${serviceIncludeOptions.map((option) => `<label class="check"><input type="checkbox" name="includes" value="${option}" /> ${option}</label>`).join('')}
+          </fieldset>
+          <label>Turnaround hours<input name="turnaroundHours" type="number" min="0" step="1" value="24" /></label>
           <label>Description<textarea name="description"></textarea></label>
           <div class="form-row">
             <button class="primary" type="submit">Save service</button>
@@ -1155,7 +1159,7 @@ function bindPricingForms(services: LaundryService[]) {
       price: Number(fd.get('price') ?? 0),
       maxKg: Number(fd.get('maxKg') ?? 0),
       dryingMinutes: Number(fd.get('dryingMinutes')) || null,
-      includes: String(fd.get('includes') ?? '').split(',').map((item) => item.trim()).filter(Boolean),
+      includes: fd.getAll('includes').map(String).filter(Boolean),
       additionalCharge: 0,
       turnaroundHours: Number(fd.get('turnaroundHours') ?? 24),
       isActive: 1,
@@ -1176,7 +1180,9 @@ function bindPricingForms(services: LaundryService[]) {
         (form.querySelector('[name=price]') as HTMLInputElement).value = String(service.price);
         (form.querySelector('[name=maxKg]') as HTMLInputElement).value = String(service.maxKg);
         (form.querySelector('[name=dryingMinutes]') as HTMLInputElement).value = service.dryingMinutes ? String(service.dryingMinutes) : '';
-        (form.querySelector('[name=includes]') as HTMLInputElement).value = service.includes.join(', ');
+        form.querySelectorAll<HTMLInputElement>('input[name="includes"]').forEach((input) => {
+          input.checked = service.includes.includes(input.value);
+        });
         (form.querySelector('[name=turnaroundHours]') as HTMLInputElement).value = String(service.turnaroundHours);
         (form.querySelector('[name=description]') as HTMLTextAreaElement).value = service.description ?? '';
         window.scrollTo({ top: 0, behavior: 'smooth' });
