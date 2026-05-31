@@ -720,8 +720,7 @@ function renderReports(orders: OrderRow[], sales: DailySale[], expenses: Disburs
       <div class="report-actions">
         <p>Summary computes sales minus disbursement for the selected dates.</p>
         <div>
-          <button class="secondary" id="email-report" type="button">Send to Email</button>
-          <button class="primary" id="export-report" type="button">Export Excel</button>
+          <button class="secondary" id="email-report" type="button">Send File</button>
         </div>
       </div>
     </section>
@@ -1268,68 +1267,186 @@ function bindReportActions(orders: OrderRow[], sales: DailySale[], expenses: Dis
     from: dateFromInput?.value || '0000-01-01',
     to: dateToInput?.value || '9999-12-31',
   });
-  const inRange = (date: string) => {
-    const range = selectedDateRange();
-    return date >= range.from && date <= range.to;
-  };
-  const reportRows = () => {
-    const types = selectedReportTypes();
+  const salesRows = () => {
     const filteredOrders = orders.filter((order) => inRange(localDateFromIso(order.createdAt)));
     const filteredSales = sales.filter((sale) => inRange(sale.saleDate));
+    const orderCashTotal = filteredOrders.reduce((sum, order) => sum + order.paidAmount, 0);
+    const orderGcashTotal = 0;
+    const manualCashTotal = filteredSales.reduce((sum, sale) => sum + sale.cashAmount, 0);
+    const manualGcashTotal = filteredSales.reduce((sum, sale) => sum + sale.gcashAmount, 0);
+    const totalCash = orderCashTotal + manualCashTotal;
+    const totalGcash = orderGcashTotal + manualGcashTotal;
+    const totalSales = totalCash + totalGcash;
+
+    return {
+      orderCashTotal,
+      orderGcashTotal,
+      manualCashTotal,
+      manualGcashTotal,
+      totalCash,
+      totalGcash,
+      totalSales,
+      rows: [
+        ['Type', 'Date', 'Number', 'Name', 'Cash', 'GCash', 'Total', 'Balance'],
+        ...filteredOrders.map((order) => ['Order', localDateFromIso(order.createdAt), order.ticket, order.customer, order.paidAmount, 0, order.paidAmount, order.balance]),
+        ...filteredSales.map((sale) => ['Manual Sale', sale.saleDate, sale.saleNumber, sale.notes ?? '', sale.cashAmount, sale.gcashAmount, sale.totalAmount, '']),
+        [],
+        ['Sales Summary', selectedDateRange().from, 'to', selectedDateRange().to, '', '', '', ''],
+        ['Order Cash', '', '', '', '', '', orderCashTotal, ''],
+        ['Order GCash', '', '', '', '', '', orderGcashTotal, ''],
+        ['Manual Cash', '', '', '', '', '', manualCashTotal, ''],
+        ['Manual GCash', '', '', '', '', '', manualGcashTotal, ''],
+        ['Total Cash', '', '', '', '', '', totalCash, ''],
+        ['Total GCash', '', '', '', '', '', totalGcash, ''],
+        ['Total Sales', '', '', '', '', '', totalSales, ''],
+      ],
+    };
+  };
+  const disbursementRows = () => {
     const filteredExpenses = expenses.filter((expense) => inRange(expense.expenseDate));
     const filteredFoldPayouts = foldPayoutRowsFromOrders(
       orders.filter((order) => inRange(localDateFromIso(order.createdAt))),
       foldRate,
     );
-    const totalSales = filteredOrders.reduce((sum, order) => sum + order.paidAmount, 0) + filteredSales.reduce((sum, sale) => sum + sale.totalAmount, 0);
-    const totalDisbursement = filteredExpenses.reduce((sum, expense) => sum + expense.amount, 0) + filteredFoldPayouts.reduce((sum, row) => sum + row.total, 0);
-    const rows: Array<Array<string | number>> = [
-      ['Type', 'Date', 'Number', 'Name', 'Cash', 'GCash', 'Total', 'Balance'],
-    ];
-    if (types.has('sales')) {
-      rows.push(...filteredOrders.map((order) => ['Order', localDateFromIso(order.createdAt), order.ticket, order.customer, '', '', order.paidAmount, order.balance]));
-      rows.push(...filteredSales.map((sale) => ['Manual Sale', sale.saleDate, sale.saleNumber, sale.notes ?? '', sale.cashAmount, sale.gcashAmount, sale.totalAmount, '']));
-    }
-    if (types.has('disbursement')) {
-      rows.push(...filteredExpenses.map((expense) => ['Expense', expense.expenseDate, expense.number, expense.name, '', '', expense.amount, '']));
-      rows.push(...filteredFoldPayouts.map((row) => ['Fold Payout', selectedDateRange().from, `${row.folds} fold(s)`, row.staffName, '', '', row.total, '']));
-    }
-    if (types.has('summary')) {
-      rows.push([]);
-      rows.push(['Summary', selectedDateRange().from, 'to', selectedDateRange().to, '', '', '', '']);
-      rows.push(['Total Sales', '', '', '', '', '', totalSales, '']);
-      rows.push(['Total Disbursement', '', '', '', '', '', totalDisbursement, '']);
-      rows.push(['Profit', '', '', '', '', '', totalSales - totalDisbursement, '']);
-    }
-    return rows;
+    const totalExpenses = filteredExpenses.reduce((sum, expense) => sum + expense.amount, 0);
+    const totalFoldPayouts = filteredFoldPayouts.reduce((sum, row) => sum + row.total, 0);
+    const totalDisbursement = totalExpenses + totalFoldPayouts;
+
+    return {
+      totalExpenses,
+      totalFoldPayouts,
+      totalDisbursement,
+      rows: [
+        ['Type', 'Date', 'Number', 'Name', 'Cash', 'GCash', 'Total', 'Balance'],
+        ...filteredExpenses.map((expense) => ['Expense', expense.expenseDate, expense.number, expense.name, '', '', expense.amount, '']),
+        ...filteredFoldPayouts.map((row) => ['Fold Payout', selectedDateRange().from, `${row.folds} fold(s)`, row.staffName, '', '', row.total, '']),
+        [],
+        ['Disbursement Summary', selectedDateRange().from, 'to', selectedDateRange().to, '', '', '', ''],
+        ['Expenses', '', '', '', '', '', totalExpenses, ''],
+        ['Fold Payouts', '', '', '', '', '', totalFoldPayouts, ''],
+        ['Total Disbursement', '', '', '', '', '', totalDisbursement, ''],
+      ],
+    };
   };
-  const excelFromRows = (rows: Array<Array<string | number>>) => {
-    const htmlRows = rows.map((row) => {
-      if (!row.length) return '<tr><td colspan="8">&nbsp;</td></tr>';
-      return `<tr>${row.map((cell) => `<td>${escapeHtml(String(cell ?? ''))}</td>`).join('')}</tr>`;
+  const summaryRows = () => {
+    const sales = salesRows();
+    const disbursement = disbursementRows();
+    const profit = sales.totalSales - disbursement.totalDisbursement;
+    return [
+      ['Summary', selectedDateRange().from, 'to', selectedDateRange().to, '', '', '', ''],
+      ['Order Cash', '', '', '', '', '', sales.orderCashTotal, ''],
+      ['Order GCash', '', '', '', '', '', sales.orderGcashTotal, ''],
+      ['Manual Cash', '', '', '', '', '', sales.manualCashTotal, ''],
+      ['Manual GCash', '', '', '', '', '', sales.manualGcashTotal, ''],
+      ['Total Cash', '', '', '', '', '', sales.totalCash, ''],
+      ['Total GCash', '', '', '', '', '', sales.totalGcash, ''],
+      ['Total Sales', '', '', '', '', '', sales.totalSales, ''],
+      ['Total Disbursement', '', '', '', '', '', disbursement.totalDisbursement, ''],
+      ['Profit', '', '', '', '', '', profit, ''],
+    ];
+  };
+  const inRange = (date: string) => {
+    const range = selectedDateRange();
+    return date >= range.from && date <= range.to;
+  };
+  const workbookFromSheets = (sheets: Array<{ name: string; rows: Array<Array<string | number>> }>) => {
+    const xmlEscape = (value: string | number | null | undefined) => String(value ?? '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&apos;');
+    const columnsForSheet = (sheetName: string) => {
+      if (sheetName === 'Sales Report') {
+        return [110, 125, 150, 215, 95, 95, 105, 105];
+      }
+
+      if (sheetName === 'Disbursement') {
+        return [130, 115, 165, 190, 95, 105, 105, 105];
+      }
+
+      return [155, 125, 125, 125, 95, 95, 115, 115];
+    };
+    const sheetXml = sheets.map((sheet) => {
+      const columnXml = columnsForSheet(sheet.name)
+        .map((width) => `<Column ss:Width="${width}" ss:AutoFitWidth="0"/>`)
+        .join('');
+      const rowXml = sheet.rows.map((row) => {
+        if (!row.length) return '<Row ss:Height="10" ss:StyleID="BorderRow"><Cell ss:StyleID="BorderCell"><Data ss:Type="String">&nbsp;</Data></Cell></Row>';
+        const isHeaderRow = row[0] === 'Type' || row[0] === 'Summary' || row[0] === 'Sales Summary' || row[0] === 'Disbursement Summary';
+        const rowStyle = isHeaderRow ? 'HeaderRow' : 'BorderRow';
+        const cellStyle = isHeaderRow ? 'HeaderCell' : 'BorderCell';
+        const rowHeight = isHeaderRow ? 26 : 22;
+        const cells = row.map((cell) => `<Cell ss:StyleID="${cellStyle}"><Data ss:Type="${typeof cell === 'number' ? 'Number' : 'String'}">${xmlEscape(cell)}</Data></Cell>`).join('');
+        return `<Row ss:Height="${rowHeight}" ss:StyleID="${rowStyle}">${cells}</Row>`;
+      }).join('');
+      return `
+        <Worksheet ss:Name="${xmlEscape(sheet.name)}">
+          <Table>
+            ${columnXml}
+            ${rowXml}
+          </Table>
+        </Worksheet>`;
     }).join('');
-    return `<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <style>
-    body { font-family: Arial, sans-serif; }
-    table { border-collapse: collapse; }
-    td { border: 1px solid #c8d3ea; padding: 6px 10px; }
-    tr:first-child td { background: #061a42; color: #fff; font-weight: bold; }
-  </style>
-</head>
-<body>
-  <h1>Laba101 POS Export</h1>
-  <p><strong>Date from:</strong> ${escapeHtml(selectedDateRange().from)}</p>
-  <p><strong>Date to:</strong> ${escapeHtml(selectedDateRange().to)}</p>
-  <table>${htmlRows}</table>
-</body>
-</html>`;
+    return `<?xml version="1.0"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:html="http://www.w3.org/TR/REC-html40">
+  <Styles>
+    <Style ss:ID="BorderCell">
+      <Alignment ss:Vertical="Center" ss:WrapText="1" />
+      <Borders>
+        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" />
+        <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" />
+        <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" />
+        <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" />
+      </Borders>
+    </Style>
+    <Style ss:ID="HeaderCell">
+      <Alignment ss:Vertical="Center" ss:WrapText="1" />
+      <Borders>
+        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" />
+        <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" />
+        <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" />
+        <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" />
+      </Borders>
+      <Font ss:Bold="1" ss:Color="#FFFFFF" />
+      <Interior ss:Color="#061a42" ss:Pattern="Solid" />
+    </Style>
+    <Style ss:ID="BorderRow">
+      <Borders>
+        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" />
+        <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" />
+        <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" />
+        <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" />
+      </Borders>
+    </Style>
+    <Style ss:ID="HeaderRow">
+      <Alignment ss:Vertical="Center" ss:WrapText="1" />
+      <Borders>
+        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" />
+        <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" />
+        <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" />
+        <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" />
+      </Borders>
+      <Font ss:Bold="1" ss:Color="#FFFFFF" />
+      <Interior ss:Color="#061a42" ss:Pattern="Solid" />
+    </Style>
+  </Styles>
+  ${sheetXml}
+</Workbook>`;
   };
   const reportFile = () => {
     const range = selectedDateRange();
-    const html = excelFromRows(reportRows());
+    const types = selectedReportTypes();
+    const sheets: Array<{ name: string; rows: Array<Array<string | number>> }> = [];
+    if (types.has('sales')) sheets.push({ name: 'Sales Report', rows: salesRows().rows });
+    if (types.has('disbursement')) sheets.push({ name: 'Disbursement', rows: disbursementRows().rows });
+    if (types.has('summary')) sheets.push({ name: 'Summary', rows: summaryRows() });
+    const html = workbookFromSheets(sheets.length ? sheets : [{ name: 'Summary', rows: summaryRows() }]);
     const fileName = `laba101-report-${range.from}-to-${range.to}.xls`;
     return new File([html], fileName, { type: 'application/vnd.ms-excel' });
   };
@@ -1339,29 +1456,22 @@ function bindReportActions(orders: OrderRow[], sales: DailySale[], expenses: Dis
       return { fileName: file.name, uri: '' };
     }
 
-    await Filesystem.requestPermissions();
     const html = await file.text();
-    const folder = 'Laba101 Reports';
-    const path = `${folder}/${file.name}`;
-    await Filesystem.mkdir({
-      path: folder,
-      directory: Directory.Documents,
-      recursive: true,
-    });
+    const path = file.name;
     await Filesystem.writeFile({
       path,
       data: html,
-      directory: Directory.Documents,
+      directory: Directory.External,
       encoding: Encoding.UTF8,
     });
-    const { uri } = await Filesystem.getUri({ path, directory: Directory.Documents });
+    const { uri } = await Filesystem.getUri({ path, directory: Directory.External });
     return { fileName: file.name, uri };
   };
   const downloadReport = () => {
-    const html = excelFromRows(reportRows());
+    const html = reportFile();
     const range = selectedDateRange();
     const fileName = `laba101-report-${range.from}-to-${range.to}.xls`;
-    const blob = new Blob([html], { type: 'application/vnd.ms-excel' });
+    const blob = html;
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -1379,7 +1489,7 @@ function bindReportActions(orders: OrderRow[], sales: DailySale[], expenses: Dis
       if (mode === 'export') {
         if (Capacitor.isNativePlatform()) {
           const saved = await saveReportToDevice();
-          alert(`Report saved to device storage: ${saved.fileName}`);
+          alert(`Report exported as "${saved.fileName}".`);
         } else {
           const fileName = downloadReport();
           alert(`Report saved: ${fileName}`);
@@ -1394,13 +1504,22 @@ function bindReportActions(orders: OrderRow[], sales: DailySale[], expenses: Dis
         const title = `Laba101 report ${range.from} to ${range.to}`;
         if (Capacitor.isNativePlatform()) {
           const saved = await saveReportToDevice();
-          await Share.share({
-            title,
-            text: `Please find the attached Laba101 report file: ${saved.fileName}`,
-            files: [saved.uri],
-            dialogTitle: 'Send report via email',
-          });
-          alert(`Report saved and shared as "${saved.fileName}".`);
+          try {
+            await Share.share({
+              title,
+              text: `Please find the attached Laba101 report file: ${saved.fileName}`,
+              files: [saved.uri],
+              dialogTitle: 'Send report via email',
+            });
+            alert(`Report saved and shared as "${saved.fileName}".`);
+          } catch (shareError) {
+            const message = String(shareError).toLowerCase();
+            if (message.includes('share canceled') || message.includes('canceled')) {
+              alert(`Report saved as "${saved.fileName}".`);
+            } else {
+              throw shareError;
+            }
+          }
         } else {
           const fileName = downloadReport();
           const body = `Hi,\n\nPlease find the attached Laba101 report file: ${fileName}\n\nDate range: ${range.from} to ${range.to}`;

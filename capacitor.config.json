@@ -1,5 +1,5 @@
 {
   "appId": "com.laba101.app",
   "appName": "LABA101",
-  "webDir": "dist"
+  "webDir": "public/build"
 }
