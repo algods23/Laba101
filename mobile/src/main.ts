@@ -320,11 +320,6 @@ function renderLogin() {
             <label class="remember"><input name="remember" type="checkbox" value="1" /> Remember me on this device</label>
             <button class="primary" id="login-button" type="submit">Sign in</button>
           </form>
-          <aside class="demo-box">
-            <p>Demo accounts</p>
-            <button type="button" data-fill-email="admin@laba101.test" data-fill-password="password"><strong>Admin</strong><span>admin@laba101.test</span></button>
-            <button type="button" data-fill-email="staff@laba101.test" data-fill-password="password"><strong>Staff</strong><span>staff@laba101.test</span></button>
-          </aside>
         </article>
       </section>
     </main>
