@@ -148,21 +148,15 @@ function cleanAddonName(name: string) {
 }
 
 const dbName = 'laba101_offline';
+const freshStartResetKey = 'fresh_start_reset_v1';
 const sqlite = new SQLiteConnection(CapacitorSQLite);
 let nativeDb: SQLiteDBConnection | null = null;
 
 const seedStaff: Staff[] = [
   { id: 1, name: 'Laba101 Admin', email: 'admin@laba101.test', password: 'password', role: 'admin', branch: 'Main Store' },
-  { id: 2, name: 'Laba101 Staff', email: 'staff@laba101.test', password: 'password', role: 'staff', branch: 'Main Store' },
-  { id: 3, name: 'Mintal Staff', email: 'mintal@laba101.test', password: 'password', role: 'staff', branch: 'Mintal Branch' },
-  { id: 4, name: 'Gensan Staff', email: 'gensan@laba101.test', password: 'password', role: 'staff', branch: 'Gensan Branch' },
 ];
 
-const seedCustomers: Customer[] = [
-  { id: 1, name: 'Mara Santos', phone: '0917 482 1101', address: 'Bajada, Davao City' },
-  { id: 2, name: 'Jun Rivera', phone: '0928 314 7720', address: 'Lanang, Davao City' },
-  { id: 3, name: 'Ana Cruz', phone: '0935 901 2234', address: 'Matina, Davao City' },
-];
+const seedCustomers: Customer[] = [];
 
 const seedServices: LaundryService[] = [
   serviceSeed(1, 'Drop-off', 'Wash, dry and fold.', 'Drop-Off', 'order', 185, 8, 40, ['Wash', 'Dry', 'Fold'], 0, 24),
@@ -230,48 +224,13 @@ async function syncSeedLaundryCatalog(db: SQLiteDBConnection) {
   }
 }
 
-const seedOrders: OrderRow[] = [
-  {
-    id: 1,
-    ticket: 'LB260527-001',
-    customerId: 1,
-    customer: 'Mara Santos',
-    phone: '0917 482 1101',
-    serviceId: 1,
-    service: 'Drop-off',
-    itemCategoryId: 1,
-    itemCategory: 'Regular Clothes',
-    branch: 'Main Store',
-    status: 'washing',
-    workflowCompleted: ['received', 'wash'],
-    weightKg: 5.75,
-    price: 185,
-    additionalCharge: 0,
-    extraServiceAmount: 0,
-    totalAmount: 185,
-    paidAmount: 185,
-    balance: 0,
-    extras: [],
-    notes: 'Separate white uniforms.',
-    foldedBy: null,
-    foldedByName: null,
-    dueAt: new Date(Date.now() + 18 * 60 * 60 * 1000).toISOString(),
-    createdAt: new Date().toISOString(),
-  },
-];
+const seedOrders: OrderRow[] = [];
 
-const seedPayments: Payment[] = [
-  { id: 1, orderId: 1, amount: 185, method: 'cash', reference: null, receivedAt: new Date().toISOString(), branch: 'Main Store' },
-];
+const seedPayments: Payment[] = [];
 
-const seedExpenses: DisbursementExpense[] = [
-  { id: 1, expenseDate: '2026-05-27', number: 'DISB-01', name: 'Water refill', category: 'Supplies', description: 'Weekly supply', amount: 250 },
-  { id: 2, expenseDate: '2026-05-27', number: 'DISB-02', name: 'Detergent', category: 'Supplies', description: 'Laundry detergent', amount: 500 },
-];
+const seedExpenses: DisbursementExpense[] = [];
 
-const seedSales: DailySale[] = [
-  { id: 1, saleDate: '2026-05-27', saleNumber: 'SALE-01', cashAmount: 1200, gcashAmount: 500, totalAmount: 1700, notes: 'Seed day total' },
-];
+const seedSales: DailySale[] = [];
 
 const seedMachines: Machine[] = [
   ...[1, 2, 3, 4].map((id) => ({ id, machineName: `Washer ${id}`, machineType: 'washer' as const, status: 'available' as const, branch: 'Main Store' })),
@@ -362,8 +321,75 @@ async function addColumnIfMissing(db: SQLiteDBConnection, table: string, column:
   }
 }
 
+async function resetBrowserToFreshStart() {
+  if (localStorage.getItem(browserKey(freshStartResetKey))) return;
+
+  writeBrowser('staff', seedStaff);
+  writeBrowser('customers', []);
+  writeBrowser('orders', []);
+  writeBrowser('payments', []);
+  writeBrowser('fold_logs', []);
+  writeBrowser('expenses', []);
+  writeBrowser('sales', []);
+  if (!localStorage.getItem(browserKey('services'))) writeBrowser('services', seedServices);
+  if (!localStorage.getItem(browserKey('item_categories'))) writeBrowser('item_categories', seedItemCategories);
+  if (!localStorage.getItem(browserKey('machines'))) writeBrowser('machines', seedMachines);
+  if (!localStorage.getItem(browserKey('subcleanings'))) writeBrowser('subcleanings', []);
+  if (!localStorage.getItem(browserKey('settings'))) writeBrowser('settings', seedSettings);
+  localStorage.removeItem('laba101-mobile-session');
+  writeBrowser(freshStartResetKey, true);
+}
+
+async function ensureNativeSeedAdmin(db: SQLiteDBConnection) {
+  const admin = seedStaff[0];
+  const existing = await db.query('SELECT id FROM staff WHERE id = ?', [admin.id]);
+  if ((existing.values ?? []).length > 0) {
+    await db.run(
+      'UPDATE staff SET name = ?, email = ?, password = COALESCE(NULLIF(password, ""), ?), role = ?, branch = ?, isActive = 1 WHERE id = ?',
+      [admin.name, admin.email, admin.password, admin.role, admin.branch, admin.id],
+    );
+    return;
+  }
+  await db.run('INSERT INTO staff (id, name, email, password, role, branch, isActive) VALUES (?, ?, ?, ?, ?, ?, ?)', [admin.id, admin.name, admin.email, admin.password, admin.role, admin.branch, 1]);
+}
+
+async function ensureNativeSeedMachines(db: SQLiteDBConnection) {
+  const machineCount = await db.query('SELECT COUNT(*) as count FROM machines');
+  if (((machineCount.values?.[0] as { count: number } | undefined)?.count ?? 0) > 0) return;
+  for (const machine of seedMachines) {
+    await db.run('INSERT INTO machines (id, machineName, machineType, status, branch) VALUES (?, ?, ?, ?, ?)', [machine.id, machine.machineName, machine.machineType, machine.status, machine.branch]);
+  }
+}
+
+async function ensureNativeSeedSettings(db: SQLiteDBConnection) {
+  for (const setting of seedSettings) {
+    await db.run('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)', [setting.key, setting.value]);
+  }
+}
+
+async function resetNativeToFreshStart(db: SQLiteDBConnection) {
+  const reset = await db.query('SELECT value FROM settings WHERE key = ?', [freshStartResetKey]);
+  if ((reset.values ?? []).length > 0) return;
+
+  await db.execute(`
+    DELETE FROM payments;
+    DELETE FROM orders;
+    DELETE FROM customers;
+    DELETE FROM fold_logs;
+    DELETE FROM disbursement_expenses;
+    DELETE FROM daily_sales;
+    DELETE FROM staff WHERE id <> 1;
+  `);
+  await ensureNativeSeedAdmin(db);
+  await ensureNativeSeedMachines(db);
+  await ensureNativeSeedSettings(db);
+  await db.run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [freshStartResetKey, nowIso()]);
+  localStorage.removeItem('laba101-mobile-session');
+}
+
 async function ensureSchema() {
   if (!Capacitor.isNativePlatform()) {
+    await resetBrowserToFreshStart();
     if (!localStorage.getItem(browserKey('seeded_v4')) && !localStorage.getItem(browserKey('services')) && !localStorage.getItem(browserKey('staff'))) {
       writeBrowser('staff', seedStaff);
       writeBrowser('customers', seedCustomers);
@@ -484,6 +510,7 @@ async function ensureSchema() {
   }
 
   await syncSeedLaundryCatalog(db);
+  await resetNativeToFreshStart(db);
 }
 
 async function insertNativeOrder(db: SQLiteDBConnection, order: OrderRow) {
