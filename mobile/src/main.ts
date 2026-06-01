@@ -56,7 +56,7 @@ if (!app) throw new Error('App root not found');
 
 let dashboardClockTimer: number | undefined;
 
-type TabKey = 'dashboard' | 'orders' | 'customers' | 'pricing' | 'disbursements' | 'reports' | 'inventory' | 'maintenance' | 'staff' | 'settings';
+type TabKey = 'dashboard' | 'orders' | 'archived' | 'customers' | 'pricing' | 'disbursements' | 'reports' | 'inventory' | 'maintenance' | 'staff' | 'settings';
 
 type ReportType = 'sales' | 'disbursement' | 'summary';
 
@@ -69,6 +69,7 @@ type ReportPreviewState = {
 const tabLabels: Record<TabKey, string> = {
   dashboard: 'Dashboard',
   orders: 'POS / Orders',
+  archived: 'Archived Order',
   customers: 'Customers',
   pricing: 'Pricing Services',
   disbursements: 'Daily Report',
@@ -88,6 +89,9 @@ const state = {
   dailyReportTab: 'expenses' as 'expenses' | 'sales',
   maintenanceTab: 'cleaning' as 'cleaning' | 'machines',
   customerSearch: '',
+  orderSearch: '',
+  orderDateFilter: '',
+  archivedOrderSearch: '',
   reportPreview: null as ReportPreviewState | null,
 };
 
@@ -282,6 +286,7 @@ function navIcon(tab: TabKey) {
   const icons: Record<TabKey, string> = {
     dashboard: 'DB',
     orders: 'PO',
+    archived: 'AR',
     customers: 'CU',
     pricing: 'PS',
     disbursements: 'DR',
@@ -396,6 +401,7 @@ async function render() {
 
         ${state.tab === 'dashboard' ? renderDashboard({ paidToday, orders: data.orders }) : ''}
         ${state.tab === 'orders' ? renderOrders(data.orders, data.customers, data.services, data.categories, data.staff, data.payments, data.branch) : ''}
+        ${state.tab === 'archived' ? renderArchivedOrders(data.orders, data.staff, data.services) : ''}
         ${state.tab === 'customers' ? renderCustomers(data.customers, data.orders) : ''}
         ${state.tab === 'pricing' ? renderPricing(data.allServices, data.categories) : ''}
         ${state.tab === 'disbursements' ? renderDisbursements(data.expenses, data.sales) : ''}
@@ -413,6 +419,7 @@ async function render() {
   bindPricingForms(data.allServices);
   bindDisbursementForms();
   bindReportActions(data.orders, data.sales, data.expenses, data.foldRate);
+  bindOrderFilters();
   bindCustomerSearch();
   bindMaintenanceForms();
   bindStaffForms(data.allStaff);
@@ -422,7 +429,7 @@ async function render() {
 
 function visibleTabs(): TabKey[] {
   if (state.currentUser?.role === 'admin') return (Object.keys(tabLabels) as TabKey[]).filter((t) => t !== 'inventory');
-  return ['orders', 'disbursements', 'reports', 'maintenance'];
+  return ['orders', 'archived', 'disbursements', 'reports', 'maintenance'];
 }
 
 function renderLogin() {
@@ -489,6 +496,7 @@ function renderDashboard(metrics: { paidToday: number; orders: OrderRow[] }) {
           </div>
           <div class="chart-days">${chartDays.map((label) => `<span>${escapeHtml(label)}</span>`).join('')}</div>
         </div>
+        <div class="chart-footnote">Values are based on order payments for the last 7 days.</div>
         <div class="summary-list" style="margin-top:16px">
           <div><span>Paid today</span><strong>${money(metrics.paidToday)}</strong></div>
         </div>
@@ -501,6 +509,14 @@ function renderOrders(orders: OrderRow[], customers: Customer[], services: Laund
   const orderServices = services.filter((service) => service.serviceType === 'order' && service.isActive);
   const addons = services.filter((service) => service.serviceType === 'addon' && service.isActive);
   const receipt = state.receiptOrderId ? orders.find((order) => order.id === state.receiptOrderId) : null;
+  const activeOrders = orders.filter((order) => order.status !== 'claimed');
+  const query = state.orderSearch.trim().toLowerCase();
+  const dateFilter = state.orderDateFilter.trim();
+  const filteredOrders = activeOrders.filter((order) => {
+    const matchesQuery = !query || [order.ticket, order.customer, order.phone, order.service, order.itemCategory, order.status].some((value) => String(value ?? '').toLowerCase().includes(query));
+    const matchesDate = !dateFilter || localDateFromIso(order.createdAt) === dateFilter;
+    return matchesQuery && matchesDate;
+  });
 
   // Only show customers who have a prior order in this branch
   const branchCustomerIds = new Set(orders.map((o) => o.customerId));
@@ -561,12 +577,65 @@ function renderOrders(orders: OrderRow[], customers: Customer[], services: Laund
 
       <article class="panel">
         ${sectionTitle('Order queue', 'Workflow, payment, and receipts')}
+        <form class="queue-filters" id="order-queue-filters">
+          <label>
+            <span>Search queue</span>
+            <input name="orderSearch" type="search" placeholder="Ticket, name, service, status" value="${escapeHtml(state.orderSearch)}" autocomplete="off" />
+          </label>
+          <label>
+            <span>Filter date</span>
+            <input name="orderDateFilter" type="date" value="${escapeHtml(state.orderDateFilter)}" />
+          </label>
+          <div class="search-actions queue-actions">
+            <button class="primary" type="submit">Apply</button>
+            <button class="secondary" type="button" id="order-queue-clear">Clear</button>
+          </div>
+        </form>
+        <div class="summary-list queue-summary">
+          <div><span>Active queue</span><strong>${filteredOrders.length}</strong></div>
+          <div><span>Claimed archived</span><strong>${orders.filter((order) => order.status === 'claimed').length}</strong></div>
+        </div>
         <div class="table orders-table">
           <div class="table-head"><div>Ticket</div><div>Customer</div><div>Total</div><div>Status</div><div>Actions</div></div>
-          ${orders.map((order) => renderOrderRow(order, staff, services)).join('') || '<div class="helper">No orders yet.</div>'}
+          ${filteredOrders.map((order) => renderOrderRow(order, staff, services)).join('') || '<div class="helper">No matching active orders.</div>'}
         </div>
       </article>
       ${receipt ? renderReceipt(receipt, payments.filter((payment) => payment.orderId === receipt.id)) : ''}
+    </section>
+  `;
+}
+
+function renderArchivedOrders(orders: OrderRow[], staff: Staff[], services: LaundryService[]) {
+  const archivedOrders = orders.filter((order) => order.status === 'claimed');
+  const query = state.archivedOrderSearch.trim().toLowerCase();
+  const filteredArchivedOrders = archivedOrders.filter((order) => {
+    if (!query) return true;
+    return [order.ticket, order.customer, order.phone, order.service, order.itemCategory].some((value) => String(value ?? '').toLowerCase().includes(query));
+  });
+
+  return `
+    <section class="grid content full">
+      <article class="panel span-2">
+        ${sectionTitle('Archived orders', 'All claimed orders are listed here')}
+        <form class="queue-filters" id="archived-order-filters">
+          <label>
+            <span>Search archived</span>
+            <input name="archivedOrderSearch" type="search" placeholder="Ticket, name, service" value="${escapeHtml(state.archivedOrderSearch)}" autocomplete="off" />
+          </label>
+          <div class="search-actions queue-actions">
+            <button class="primary" type="submit">Apply</button>
+            <button class="secondary" type="button" id="archived-order-clear">Clear</button>
+          </div>
+        </form>
+        <div class="summary-list queue-summary">
+          <div><span>Archived claims</span><strong>${filteredArchivedOrders.length}</strong></div>
+          <div><span>Total claimed</span><strong>${archivedOrders.length}</strong></div>
+        </div>
+        <div class="table orders-table archived-orders-table">
+          <div class="table-head"><div>Ticket</div><div>Customer</div><div>Total</div><div>Status</div><div>Actions</div></div>
+          ${filteredArchivedOrders.map((order) => renderOrderRow(order, staff, services)).join('') || '<div class="helper">No archived orders found.</div>'}
+        </div>
+      </article>
     </section>
   `;
 }
@@ -897,23 +966,23 @@ function renderReports(orders: OrderRow[], sales: DailySale[], expenses: Disburs
           <article>
             ${sectionTitle('Sales report preview', `${preview.selection.from} to ${preview.selection.to}`)}
             <div class="table wide-table report-preview-table">
-              <div class="table-head"><div>Type</div><div>Date</div><div>Number</div><div>Name</div><div>Cash</div><div>GCash</div><div>Total</div><div>Balance</div></div>
-              ${preview.salesRows().rows.slice(1).map((row) => `<div class="table-row">${row.map((value) => `<div>${escapeHtml(value ?? '')}</div>`).join('')}</div>`).join('')}
+              <div class="table-head report-table-head"><div>Type</div><div>Date</div><div>Number</div><div>Name</div><div>Cash</div><div>GCash</div><div>Total</div><div>Balance</div></div>
+              ${preview.salesRows().rows.slice(1).map((row) => `<div class="table-row report-table-row">${row.map((value) => `<div>${escapeHtml(value ?? '')}</div>`).join('')}</div>`).join('')}
             </div>
           </article>` : ''}
         ${preview.selectedTypes.has('disbursement') ? `
           <article>
             ${sectionTitle('Disbursement preview', `${preview.selection.from} to ${preview.selection.to}`)}
             <div class="table wide-table report-preview-table">
-              <div class="table-head"><div>Type</div><div>Date</div><div>Number</div><div>Name</div><div>Cash</div><div>GCash</div><div>Total</div><div>Balance</div></div>
-              ${preview.disbursementRows().rows.slice(1).map((row) => `<div class="table-row">${row.map((value) => `<div>${escapeHtml(value ?? '')}</div>`).join('')}</div>`).join('')}
+              <div class="table-head report-table-head"><div>Type</div><div>Date</div><div>Number</div><div>Name</div><div>Cash</div><div>GCash</div><div>Total</div><div>Balance</div></div>
+              ${preview.disbursementRows().rows.slice(1).map((row) => `<div class="table-row report-table-row">${row.map((value) => `<div>${escapeHtml(value ?? '')}</div>`).join('')}</div>`).join('')}
             </div>
           </article>` : ''}
         ${preview.selectedTypes.has('summary') ? `
           <article>
             ${sectionTitle('Summary preview', `${preview.selection.from} to ${preview.selection.to}`)}
             <div class="summary-list report-summary-list">
-              ${preview.summaryRows().map((row) => `<div><span>${escapeHtml(row[0] as string)}</span><strong>${escapeHtml(String(row[6] ?? ''))}</strong></div>`).join('')}
+              ${preview.summaryRows().map((row) => `<div><span>${escapeHtml(row[0] as string)}</span><strong>${escapeHtml(String(row[6] ?? '0'))}</strong></div>`).join('')}
             </div>
           </article>` : ''}
       </section>
@@ -1650,6 +1719,34 @@ function bindReportActions(orders: OrderRow[], sales: DailySale[], expenses: Dis
   });
   document.querySelector<HTMLButtonElement>('#email-report')?.addEventListener('click', async () => {
     await shareOrDownloadReport('email');
+  });
+}
+
+function bindOrderFilters() {
+  document.querySelector<HTMLFormElement>('#order-queue-filters')?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const fd = new FormData(event.currentTarget);
+    state.orderSearch = String(fd.get('orderSearch') ?? '').trim();
+    state.orderDateFilter = String(fd.get('orderDateFilter') ?? '').trim();
+    void render();
+  });
+
+  document.querySelector<HTMLButtonElement>('#order-queue-clear')?.addEventListener('click', () => {
+    state.orderSearch = '';
+    state.orderDateFilter = '';
+    void render();
+  });
+
+  document.querySelector<HTMLFormElement>('#archived-order-filters')?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const fd = new FormData(event.currentTarget);
+    state.archivedOrderSearch = String(fd.get('archivedOrderSearch') ?? '').trim();
+    void render();
+  });
+
+  document.querySelector<HTMLButtonElement>('#archived-order-clear')?.addEventListener('click', () => {
+    state.archivedOrderSearch = '';
+    void render();
   });
 }
 

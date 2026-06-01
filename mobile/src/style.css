@@ -527,6 +527,13 @@ button {
   padding-bottom: 6px;
 }
 
+.chart-footnote {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
 .mini-chart.revenue-chart {
   width: 100%;
   min-width: 100%;
@@ -637,6 +644,19 @@ button {
   overflow-x: auto;
 }
 
+.report-preview .table-head,
+.report-preview .table-row {
+  display: grid;
+}
+
+.report-preview .table-head {
+  border-radius: 16px;
+}
+
+.report-preview .table-row {
+  min-width: 820px;
+}
+
 .report-preview-table .table-head,
 .report-preview-table .table-row {
   min-width: 820px;
@@ -667,16 +687,47 @@ button {
   font-size: 1rem;
 }
 
+.report-summary-list span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.82rem;
+  margin-bottom: 4px;
+}
+
 .search-box {
   display: grid;
   gap: 12px;
   margin-bottom: 14px;
 }
 
+.search-box input {
+  min-width: 0;
+}
+
 .search-actions {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.queue-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(180px, 0.7fr) auto;
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 14px;
+}
+
+.queue-filters label {
+  min-width: 0;
+}
+
+.queue-summary {
+  margin-bottom: 14px;
+}
+
+.queue-actions {
+  align-self: end;
 }
 
 .customer-stack {
@@ -795,6 +846,10 @@ button {
   display: block;
   color: var(--navy);
   margin-top: 3px;
+}
+
+.service-card-grid .row-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .navbar-time {
@@ -920,6 +975,15 @@ button {
   margin-left: auto;
   border-radius: 999px;
   background: #22c55e;
+}
+
+.receipt-modal {
+  width: min(100%, 2.4in);
+}
+
+.receipt {
+  width: 100%;
+  max-width: 2.2in;
 }
 
 .warning-panel {
@@ -1477,6 +1541,14 @@ legend {
   .report-preview-table .table-row {
     min-width: 760px;
   }
+
+  .queue-filters {
+    grid-template-columns: 1fr 180px;
+  }
+
+  .queue-actions {
+    grid-column: 1 / -1;
+  }
 }
 
 @media (max-width: 860px) {
@@ -1731,6 +1803,10 @@ legend {
     grid-template-columns: 1fr;
   }
 
+  .queue-filters {
+    grid-template-columns: 1fr;
+  }
+
   .mini-chart.revenue-chart {
     height: 180px;
     gap: 6px;
@@ -1744,6 +1820,19 @@ legend {
   .chart-days {
     gap: 6px;
     font-size: 0.7rem;
+  }
+
+  .report-preview .table-head,
+  .report-preview .table-row {
+    min-width: 640px;
+  }
+
+  .report-preview .table-head {
+    display: grid;
+  }
+
+  .report-preview .table-row {
+    grid-template-columns: 82px 96px 100px 1.2fr 78px 78px 88px 78px;
   }
 
   .service-fields,
@@ -1782,6 +1871,14 @@ legend {
   .stat .value {
     font-size: 1.7rem;
   }
+
+  .receipt-modal {
+    width: 100%;
+  }
+
+  .receipt {
+    max-width: 2in;
+  }
 }
 
 @media print {
@@ -1816,6 +1913,8 @@ legend {
   }
 
   .receipt {
+    width: 2in;
+    max-width: 2in;
     border: 0;
     border-radius: 0;
     box-shadow: none;
