@@ -657,6 +657,19 @@ button {
   min-width: 820px;
 }
 
+.report-preview .table-head > div,
+.report-preview .table-row > div {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.report-preview .table-head > div:nth-child(4),
+.report-preview .table-row > div:nth-child(4) {
+  white-space: nowrap;
+  word-break: normal;
+}
+
 .report-preview-table .table-head,
 .report-preview-table .table-row {
   min-width: 820px;
@@ -984,6 +997,27 @@ button {
 .receipt {
   width: 100%;
   max-width: 2.2in;
+  font-size: 0.68rem;
+  line-height: 1.22;
+}
+
+.receipt h3 {
+  font-size: 0.82rem;
+}
+
+.receipt-head p,
+.receipt-customer span,
+.receipt-payments small {
+  font-size: 0.62rem;
+}
+
+.receipt .summary-list div,
+.receipt-payments div {
+  padding: 6px 8px;
+}
+
+.receipt .summary-list.receipt-lines div {
+  gap: 4px;
 }
 
 .warning-panel {
@@ -1832,7 +1866,7 @@ legend {
   }
 
   .report-preview .table-row {
-    grid-template-columns: 82px 96px 100px 1.2fr 78px 78px 88px 78px;
+    grid-template-columns: 82px 96px 100px minmax(120px, 1.2fr) 78px 78px 88px 78px;
   }
 
   .service-fields,
@@ -1878,6 +1912,7 @@ legend {
 
   .receipt {
     max-width: 2in;
+    font-size: 0.64rem;
   }
 }
 
@@ -1915,6 +1950,7 @@ legend {
   .receipt {
     width: 2in;
     max-width: 2in;
+    font-size: 0.62rem;
     border: 0;
     border-radius: 0;
     box-shadow: none;

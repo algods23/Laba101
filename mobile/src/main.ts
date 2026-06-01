@@ -401,7 +401,7 @@ async function render() {
 
         ${state.tab === 'dashboard' ? renderDashboard({ paidToday, orders: data.orders }) : ''}
         ${state.tab === 'orders' ? renderOrders(data.orders, data.customers, data.services, data.categories, data.staff, data.payments, data.branch) : ''}
-        ${state.tab === 'archived' ? renderArchivedOrders(data.orders, data.staff, data.services) : ''}
+        ${state.tab === 'archived' ? renderArchivedOrders(data.orders, data.staff, data.services, data.payments) : ''}
         ${state.tab === 'customers' ? renderCustomers(data.customers, data.orders) : ''}
         ${state.tab === 'pricing' ? renderPricing(data.allServices, data.categories) : ''}
         ${state.tab === 'disbursements' ? renderDisbursements(data.expenses, data.sales) : ''}
@@ -483,23 +483,24 @@ function renderDashboard(metrics: { paidToday: number; orders: OrderRow[] }) {
       .reduce((sum, order) => sum + order.paidAmount, 0);
   });
   const chartMax = Math.max(1, ...chartValues);
+  const chartHeight = 210;
   return `
     <section class="dashboard-main">
       <article class="panel revenue-panel">
         ${sectionTitle('Revenue overview', 'Paid amount for the last 7 days.')}
+        <div class="stats compact dashboard-stats">
+          <div class="stat"><span class="card-label">Paid Today</span><div class="value">${money(metrics.paidToday)}</div></div>
+        </div>
         <div class="chart-shell">
           <div class="mini-chart revenue-chart">
             ${chartValues.map((value, index) => {
-              const height = Math.max(16, Math.round((value / chartMax) * 100));
-              return `<div class="chart-bar ${index === chartValues.length - 1 ? 'is-today' : ''}"><span style="height:${height}%"></span><strong>${money(value)}</strong></div>`;
+              const height = Math.max(12, Math.round((value / chartMax) * chartHeight));
+              return `<div class="chart-bar ${index === chartValues.length - 1 ? 'is-today' : ''}"><span style="height:${height}px"></span><strong>${money(value)}</strong></div>`;
             }).join('')}
           </div>
           <div class="chart-days">${chartDays.map((label) => `<span>${escapeHtml(label)}</span>`).join('')}</div>
         </div>
         <div class="chart-footnote">Values are based on order payments for the last 7 days.</div>
-        <div class="summary-list" style="margin-top:16px">
-          <div><span>Paid today</span><strong>${money(metrics.paidToday)}</strong></div>
-        </div>
       </article>
     </section>
   `;
@@ -605,13 +606,14 @@ function renderOrders(orders: OrderRow[], customers: Customer[], services: Laund
   `;
 }
 
-function renderArchivedOrders(orders: OrderRow[], staff: Staff[], services: LaundryService[]) {
+function renderArchivedOrders(orders: OrderRow[], staff: Staff[], services: LaundryService[], payments: Payment[]) {
   const archivedOrders = orders.filter((order) => order.status === 'claimed');
   const query = state.archivedOrderSearch.trim().toLowerCase();
   const filteredArchivedOrders = archivedOrders.filter((order) => {
     if (!query) return true;
     return [order.ticket, order.customer, order.phone, order.service, order.itemCategory].some((value) => String(value ?? '').toLowerCase().includes(query));
   });
+  const receipt = state.receiptOrderId ? orders.find((order) => order.id === state.receiptOrderId) : null;
 
   return `
     <section class="grid content full">
@@ -636,6 +638,7 @@ function renderArchivedOrders(orders: OrderRow[], staff: Staff[], services: Laun
           ${filteredArchivedOrders.map((order) => renderOrderRow(order, staff, services)).join('') || '<div class="helper">No archived orders found.</div>'}
         </div>
       </article>
+      ${receipt ? renderReceipt(receipt, payments.filter((payment) => payment.orderId === receipt.id)) : ''}
     </section>
   `;
 }
