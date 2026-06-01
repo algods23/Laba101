@@ -1,4 +1,5 @@
 import './style.css';
+import { Capacitor } from '@capacitor/core';
 import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import {
@@ -57,6 +58,14 @@ let dashboardClockTimer: number | undefined;
 
 type TabKey = 'dashboard' | 'orders' | 'customers' | 'pricing' | 'disbursements' | 'reports' | 'inventory' | 'maintenance' | 'staff' | 'settings';
 
+type ReportType = 'sales' | 'disbursement' | 'summary';
+
+type ReportPreviewState = {
+  from: string;
+  to: string;
+  types: ReportType[];
+};
+
 const tabLabels: Record<TabKey, string> = {
   dashboard: 'Dashboard',
   orders: 'POS / Orders',
@@ -78,6 +87,8 @@ const state = {
   sidebarOpen: false,
   dailyReportTab: 'expenses' as 'expenses' | 'sales',
   maintenanceTab: 'cleaning' as 'cleaning' | 'machines',
+  customerSearch: '',
+  reportPreview: null as ReportPreviewState | null,
 };
 
 const serviceIncludeOptions = ['Wash', 'Dry', 'Fold', 'Detergent', 'Fabcon', 'Zonrox'] as const;
@@ -138,6 +149,113 @@ function dashboardDateTime(date = new Date()) {
   return {
     date: new Intl.DateTimeFormat('en-PH', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }).format(date),
     time: new Intl.DateTimeFormat('en-PH', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true }).format(date),
+  };
+}
+
+function currentReportSelection(): ReportPreviewState {
+  const dateFromInput = document.querySelector<HTMLInputElement>('[data-date-from]');
+  const dateToInput = document.querySelector<HTMLInputElement>('[data-date-to]');
+  const types = Array.from(document.querySelectorAll<HTMLInputElement>('input[name="reportType"]:checked'))
+    .map((input) => input.value)
+    .filter((value): value is ReportType => value === 'sales' || value === 'disbursement' || value === 'summary');
+
+  return {
+    from: dateFromInput?.value || '0000-01-01',
+    to: dateToInput?.value || '9999-12-31',
+    types: types.length ? types : ['summary'],
+  };
+}
+
+function reportSelectionInRange(date: string, selection: { from: string; to: string }) {
+  return date >= selection.from && date <= selection.to;
+}
+
+function buildReportData(orders: OrderRow[], sales: DailySale[], expenses: DisbursementExpense[], foldRate: number, selection: { from: string; to: string; types: ReportType[] }) {
+  const selectedTypes = new Set(selection.types);
+  const salesOrders = orders.filter((order) => reportSelectionInRange(localDateFromIso(order.createdAt), selection));
+  const manualSales = sales.filter((sale) => reportSelectionInRange(sale.saleDate, selection));
+  const filteredExpenses = expenses.filter((expense) => reportSelectionInRange(expense.expenseDate, selection));
+  const filteredFoldPayouts = foldPayoutRowsFromOrders(salesOrders, foldRate);
+
+  const orderCashTotal = salesOrders.reduce((sum, order) => sum + order.paidAmount, 0);
+  const manualCashTotal = manualSales.reduce((sum, sale) => sum + sale.cashAmount, 0);
+  const manualGcashTotal = manualSales.reduce((sum, sale) => sum + sale.gcashAmount, 0);
+  const orderGcashTotal = 0;
+  const totalCash = orderCashTotal + manualCashTotal;
+  const totalGcash = orderGcashTotal + manualGcashTotal;
+  const totalSales = totalCash + totalGcash;
+  const totalExpenses = filteredExpenses.reduce((sum, expense) => sum + expense.amount, 0);
+  const totalFoldPayouts = filteredFoldPayouts.reduce((sum, row) => sum + row.total, 0);
+  const totalDisbursement = totalExpenses + totalFoldPayouts;
+  const profit = totalSales - totalDisbursement;
+
+  const salesRows = () => ({
+    orderCashTotal,
+    orderGcashTotal,
+    manualCashTotal,
+    manualGcashTotal,
+    totalCash,
+    totalGcash,
+    totalSales,
+    rows: [
+      ['Type', 'Date', 'Number', 'Name', 'Cash', 'GCash', 'Total', 'Balance'],
+      ...salesOrders.map((order) => ['Order', localDateFromIso(order.createdAt), order.ticket, order.customer, order.paidAmount, 0, order.paidAmount, order.balance]),
+      ...manualSales.map((sale) => ['Manual Sale', sale.saleDate, sale.saleNumber, sale.notes ?? '', sale.cashAmount, sale.gcashAmount, sale.totalAmount, '']),
+      [],
+      ['Sales Summary', selection.from, 'to', selection.to, '', '', '', ''],
+      ['Order Cash', '', '', '', '', '', orderCashTotal, ''],
+      ['Order GCash', '', '', '', '', '', orderGcashTotal, ''],
+      ['Manual Cash', '', '', '', '', '', manualCashTotal, ''],
+      ['Manual GCash', '', '', '', '', '', manualGcashTotal, ''],
+      ['Total Cash', '', '', '', '', '', totalCash, ''],
+      ['Total GCash', '', '', '', '', '', totalGcash, ''],
+      ['Total Sales', '', '', '', '', '', totalSales, ''],
+    ],
+  });
+
+  const disbursementRows = () => ({
+    totalExpenses,
+    totalFoldPayouts,
+    totalDisbursement,
+    rows: [
+      ['Type', 'Date', 'Number', 'Name', 'Cash', 'GCash', 'Total', 'Balance'],
+      ...filteredExpenses.map((expense) => ['Expense', expense.expenseDate, expense.number, expense.name, '', '', expense.amount, '']),
+      [],
+      ['Fold Payout Records', selection.from, 'to', selection.to, '', '', '', ''],
+      ['Staff', 'Fold Count', 'Rate', 'Total', '', '', '', ''],
+      ...filteredFoldPayouts.map((row) => [row.staffName, row.folds, row.rate, row.total, '', '', '', '']),
+      [],
+      ['Disbursement Summary', selection.from, 'to', selection.to, '', '', '', ''],
+      ['Expenses', '', '', '', '', '', totalExpenses, ''],
+      ['Fold Payouts', '', '', '', '', '', totalFoldPayouts, ''],
+      ['Total Disbursement', '', '', '', '', '', totalDisbursement, ''],
+    ],
+  });
+
+  const summaryRows = () => {
+    const salesData = salesRows();
+    const disbursementData = disbursementRows();
+    return [
+      ['Summary', selection.from, 'to', selection.to, '', '', '', ''],
+      ['Order Cash', '', '', '', '', '', salesData.orderCashTotal, ''],
+      ['Order GCash', '', '', '', '', '', salesData.orderGcashTotal, ''],
+      ['Manual Cash', '', '', '', '', '', salesData.manualCashTotal, ''],
+      ['Manual GCash', '', '', '', '', '', salesData.manualGcashTotal, ''],
+      ['Total Cash', '', '', '', '', '', salesData.totalCash, ''],
+      ['Total GCash', '', '', '', '', '', salesData.totalGcash, ''],
+      ['Total Sales', '', '', '', '', '', salesData.totalSales, ''],
+      ['Total Disbursement', '', '', '', '', '', disbursementData.totalDisbursement, ''],
+      ['Profit', '', '', '', '', '', profit, ''],
+    ];
+  };
+
+  return {
+    selection,
+    selectedTypes,
+    salesRows,
+    disbursementRows,
+    summaryRows,
+    profit,
   };
 }
 
@@ -269,10 +387,14 @@ async function render() {
             <p class="eyebrow">Laba101</p>
             <h2>${escapeHtml(pageTitle())}</h2>
           </div>
+          <div class="navbar-time">
+            <strong data-navbar-time>--:--</strong>
+            <span data-navbar-date>Loading...</span>
+          </div>
           <button class="mobile-avatar" type="button">${initials(state.currentUser)}</button>
         </header>
 
-        ${state.tab === 'dashboard' ? renderDashboard({ openQueue, readyPickup, customerCount: data.customers.length, paidToday, orders: data.orders }) : ''}
+        ${state.tab === 'dashboard' ? renderDashboard({ paidToday, orders: data.orders }) : ''}
         ${state.tab === 'orders' ? renderOrders(data.orders, data.customers, data.services, data.categories, data.staff, data.payments, data.branch) : ''}
         ${state.tab === 'customers' ? renderCustomers(data.customers, data.orders) : ''}
         ${state.tab === 'pricing' ? renderPricing(data.allServices, data.categories) : ''}
@@ -291,6 +413,7 @@ async function render() {
   bindPricingForms(data.allServices);
   bindDisbursementForms();
   bindReportActions(data.orders, data.sales, data.expenses, data.foldRate);
+  bindCustomerSearch();
   bindMaintenanceForms();
   bindStaffForms(data.allStaff);
   bindSettingsForms();
@@ -337,41 +460,37 @@ function bindLoginShortcuts() {
   });
 }
 
-function renderDashboard(metrics: { openQueue: number; readyPickup: number; customerCount: number; paidToday: number; orders: OrderRow[] }) {
-  const recent = metrics.orders.slice(0, 3);
+function renderDashboard(metrics: { paidToday: number; orders: OrderRow[] }) {
   const now = new Date();
-  const display = dashboardDateTime(now);
   const chartDays = Array.from({ length: 7 }, (_, index) => {
     const date = new Date(now);
     date.setDate(now.getDate() - (6 - index));
     return new Intl.DateTimeFormat('en-PH', { month: 'short', day: 'numeric' }).format(date);
   });
+  const chartValues = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(now);
+    date.setDate(now.getDate() - (6 - index));
+    const key = localDateInput(date);
+    return metrics.orders
+      .filter((order) => localDateFromIso(order.createdAt) === key)
+      .reduce((sum, order) => sum + order.paidAmount, 0);
+  });
+  const chartMax = Math.max(1, ...chartValues);
   return `
-    <section class="panel dashboard-clock">
-      <div>
-        <p class="eyebrow">Device local time</p>
-        <h2 data-dashboard-time>${escapeHtml(display.time)}</h2>
-      </div>
-      <strong data-dashboard-date>${escapeHtml(display.date)}</strong>
-    </section>
-    <section class="grid stats">
-      <div class="panel stat"><div class="card-label">Active orders</div><div class="value">${metrics.openQueue}</div><div class="helper">Open queue</div></div>
-      <div class="panel stat"><div class="card-label">Ready pickup</div><div class="value">${metrics.readyPickup}</div><div class="helper">Awaiting claim</div></div>
-      <div class="panel stat"><div class="card-label">Paid today</div><div class="value">${money(metrics.paidToday)}</div><div class="helper">Collected cash</div></div>
-      <div class="panel stat"><div class="card-label">Customers</div><div class="value">${metrics.customerCount}</div><div class="helper">Customer records</div></div>
-    </section>
     <section class="dashboard-main">
       <article class="panel revenue-panel">
         ${sectionTitle('Revenue overview', 'Paid amount for the last 7 days.')}
-        <div class="mini-chart">
-          <span></span><span></span><span></span><span></span><span></span><span></span><span class="is-today"></span>
+        <div class="chart-shell">
+          <div class="mini-chart revenue-chart">
+            ${chartValues.map((value, index) => {
+              const height = Math.max(16, Math.round((value / chartMax) * 100));
+              return `<div class="chart-bar ${index === chartValues.length - 1 ? 'is-today' : ''}"><span style="height:${height}%"></span><strong>${money(value)}</strong></div>`;
+            }).join('')}
+          </div>
+          <div class="chart-days">${chartDays.map((label) => `<span>${escapeHtml(label)}</span>`).join('')}</div>
         </div>
-        <div class="chart-days">${chartDays.map((label) => `<span>${escapeHtml(label)}</span>`).join('')}</div>
-      </article>
-      <article class="panel recent-panel">
-        ${sectionTitle('Recent activities', 'Latest tickets and workflow movements.')}
-        <div class="activity-list">
-          ${recent.map((order) => `<div><strong>${escapeHtml(order.ticket)} moved to ${escapeHtml(order.status)}</strong><span>${escapeHtml(order.customer)} - just now</span></div>`).join('') || '<p class="helper">No recent activity.</p>'}
+        <div class="summary-list" style="margin-top:16px">
+          <div><span>Paid today</span><strong>${money(metrics.paidToday)}</strong></div>
         </div>
       </article>
     </section>
@@ -532,20 +651,59 @@ function renderReceipt(order: OrderRow, payments: Payment[]) {
 }
 
 function renderCustomers(customers: Customer[], orders: OrderRow[]) {
+  const query = state.customerSearch.trim().toLowerCase();
+  const filteredCustomers = customers.filter((customer) => {
+    if (!query) return false;
+    return customer.name.toLowerCase().includes(query);
+  });
   return `
     <section class="grid content full">
       <article class="panel">
         ${sectionTitle('Customer Management', 'Customer records from local offline storage')}
+        <form class="search-box" id="customer-search-form">
+          <label>
+            <span>Search customer name</span>
+            <input name="customerSearch" data-customer-search type="search" placeholder="Type the customer name then tap Search" value="${escapeHtml(state.customerSearch)}" autocomplete="off" />
+          </label>
+          <div class="search-actions">
+            <button class="primary" type="submit">Search</button>
+            <button class="secondary" type="button" id="customer-search-clear">Clear</button>
+          </div>
+        </form>
         <div class="summary-list">
           <div><span>Total customers</span><strong>${customers.length}</strong></div>
-          <div><span>Orders linked</span><strong>${orders.length}</strong></div>
+          <div><span>Matching customers</span><strong>${query ? filteredCustomers.length : 0}</strong></div>
         </div>
       </article>
       <article class="panel">
-        ${sectionTitle('Customer list', 'Names, phones, and addresses')}
-        <div class="table">
-          <div class="table-head"><div>Name</div><div>Phone</div><div>Address</div><div></div><div></div></div>
-          ${customers.map((customer) => `<div class="table-row"><div><strong>${escapeHtml(customer.name)}</strong></div><div>${escapeHtml(customer.phone ?? 'No phone')}</div><div>${escapeHtml(customer.address ?? 'No address')}</div><div></div><div></div></div>`).join('') || '<div class="helper">No customers yet.</div>'}
+        ${sectionTitle('Customer list', 'Names, phones, addresses, and order history')}
+        <div class="customer-stack">
+          ${query ? filteredCustomers.map((customer) => {
+            const customerOrders = orders.filter((order) => order.customerId === customer.id);
+            return `
+              <article class="customer-card">
+                <header>
+                  <div>
+                    <strong>${escapeHtml(customer.name)}</strong>
+                    <p>${escapeHtml(customer.phone ?? 'No phone')} · ${escapeHtml(customer.address ?? 'No address')}</p>
+                  </div>
+                  <span>${customerOrders.length} order(s)</span>
+                </header>
+                <div class="customer-orders">
+                  ${customerOrders.length ? customerOrders.map((order) => `
+                    <div class="customer-order-row">
+                      <div>
+                        <strong>${escapeHtml(order.ticket)}</strong>
+                        <span>${escapeHtml(order.service)} · ${escapeHtml(order.itemCategory)}</span>
+                      </div>
+                      <div>
+                        <strong>${money(order.totalAmount)}</strong>
+                        <span>${escapeHtml(order.status)}</span>
+                      </div>
+                    </div>`).join('') : '<p class="helper">No order records yet.</p>'}
+                </div>
+              </article>`;
+          }).join('') : '<div class="helper">Search a customer name to display matching records and their order history.</div>'}
         </div>
       </article>
     </section>
@@ -590,23 +748,35 @@ function renderPricing(services: LaundryService[], categories: ItemCategory[]) {
             <label>Name<input name="name" required /></label>
             <label>Max KG<input name="maxKg" type="number" min="0.25" step="0.01" required /></label>
           </div>
-          <label>Additional fee per extra KG<input name="additionalFee" type="number" min="0" step="0.01" value="0" /></label>
           <button class="primary" type="submit">Save category</button>
         </form>
       </article>
       <article class="panel span-2">
-        <div class="table">
-          <div class="table-head"><div>Name</div><div>Type</div><div>Price</div><div>Includes</div><div>Active</div><div>Actions</div></div>
-          ${services.map((service) => `<div class="table-row"><div>${escapeHtml(service.name)}</div><div>${escapeHtml(service.serviceType)}</div><div>${money(service.price)}</div><div>${escapeHtml(service.includes.join(', '))}</div><div>${service.isActive ? 'Yes' : 'No'}</div>
-          <div class="row-actions">
-            <button class="secondary edit-service-btn" data-id="${service.id}">Edit</button>
-            ${service.isActive ? `<button class="secondary deactivate-service-btn" data-id="${service.id}">Deactivate</button>` : `<button class="secondary activate-service-btn" data-id="${service.id}">Activate</button>`}
-          </div></div>`).join('')}
+        <div class="service-card-grid">
+          ${services.map((service) => `
+            <article class="service-card">
+              <header>
+                <strong>${escapeHtml(service.name)}</strong>
+                <span>${escapeHtml(service.category)}</span>
+              </header>
+              <div class="service-fields">
+                <div><span>price:</span><strong>${money(service.price)}</strong></div>
+                <div><span>type:</span><strong>${escapeHtml(service.serviceType)}</strong></div>
+                <div><span>category:</span><strong>${escapeHtml(service.category)}</strong></div>
+                <div><span>active:</span><strong>${service.isActive ? 'yes' : 'no'}</strong></div>
+              </div>
+              <div class="service-meta">Includes: ${escapeHtml(service.includes.join(', ') || 'none')}</div>
+              <div class="row-actions">
+                <button class="secondary edit-service-btn" data-id="${service.id}">Edit</button>
+                ${service.isActive ? `<button class="secondary deactivate-service-btn" data-id="${service.id}">Deactivate</button>` : `<button class="secondary activate-service-btn" data-id="${service.id}">Activate</button>`}
+              </div>
+            </article>
+          `).join('')}
         </div>
         <div class="section-divider"></div>
         <div class="table">
-          <div class="table-head"><div>Name</div><div>Max KG</div><div>Extra fee</div><div></div><div></div></div>
-          ${categories.map((category) => `<div class="table-row"><div>${escapeHtml(category.name)}</div><div>${category.maxKg}</div><div>${money(category.additionalFee)}</div><div></div><div></div></div>`).join('')}
+          <div class="table-head"><div>Name</div><div>Max KG</div><div></div><div></div><div></div></div>
+          ${categories.map((category) => `<div class="table-row"><div>${escapeHtml(category.name)}</div><div>${category.maxKg}</div><div></div><div></div><div></div></div>`).join('')}
         </div>
       </article>
     </section>
@@ -680,6 +850,7 @@ function renderDisbursements(expenses: DisbursementExpense[], sales: DailySale[]
 }
 
 function renderReports(orders: OrderRow[], sales: DailySale[], expenses: DisbursementExpense[], foldRate: number, salesTotal: number, disbursementTotal: number, profit: number) {
+  const preview = state.reportPreview ? buildReportData(orders, sales, expenses, foldRate, state.reportPreview) : null;
   return `
     <section class="page-head">
       <div>
@@ -715,10 +886,38 @@ function renderReports(orders: OrderRow[], sales: DailySale[], expenses: Disburs
       <div class="report-actions">
         <p>Summary computes sales minus disbursement for the selected dates.</p>
         <div>
+          <button class="secondary" id="generate-report" type="button">Generate report</button>
           <button class="secondary" id="email-report" type="button">Send File</button>
         </div>
       </div>
     </section>
+    ${preview ? `
+      <section class="panel report-preview">
+        ${preview.selectedTypes.has('sales') ? `
+          <article>
+            ${sectionTitle('Sales report preview', `${preview.selection.from} to ${preview.selection.to}`)}
+            <div class="table wide-table report-preview-table">
+              <div class="table-head"><div>Type</div><div>Date</div><div>Number</div><div>Name</div><div>Cash</div><div>GCash</div><div>Total</div><div>Balance</div></div>
+              ${preview.salesRows().rows.slice(1).map((row) => `<div class="table-row">${row.map((value) => `<div>${escapeHtml(value ?? '')}</div>`).join('')}</div>`).join('')}
+            </div>
+          </article>` : ''}
+        ${preview.selectedTypes.has('disbursement') ? `
+          <article>
+            ${sectionTitle('Disbursement preview', `${preview.selection.from} to ${preview.selection.to}`)}
+            <div class="table wide-table report-preview-table">
+              <div class="table-head"><div>Type</div><div>Date</div><div>Number</div><div>Name</div><div>Cash</div><div>GCash</div><div>Total</div><div>Balance</div></div>
+              ${preview.disbursementRows().rows.slice(1).map((row) => `<div class="table-row">${row.map((value) => `<div>${escapeHtml(value ?? '')}</div>`).join('')}</div>`).join('')}
+            </div>
+          </article>` : ''}
+        ${preview.selectedTypes.has('summary') ? `
+          <article>
+            ${sectionTitle('Summary preview', `${preview.selection.from} to ${preview.selection.to}`)}
+            <div class="summary-list report-summary-list">
+              ${preview.summaryRows().map((row) => `<div><span>${escapeHtml(row[0] as string)}</span><strong>${escapeHtml(String(row[6] ?? ''))}</strong></div>`).join('')}
+            </div>
+          </article>` : ''}
+      </section>
+    ` : ''}
   `;
 }
 
@@ -999,8 +1198,8 @@ function bindLoginForm() {
 
 function bindDashboardClock() {
   if (dashboardClockTimer) window.clearInterval(dashboardClockTimer);
-  const timeTarget = document.querySelector<HTMLElement>('[data-dashboard-time]');
-  const dateTarget = document.querySelector<HTMLElement>('[data-dashboard-date]');
+  const timeTarget = document.querySelector<HTMLElement>('[data-navbar-time]');
+  const dateTarget = document.querySelector<HTMLElement>('[data-navbar-date]');
   if (!timeTarget || !dateTarget) {
     dashboardClockTimer = undefined;
     return;
@@ -1233,6 +1432,11 @@ function bindDisbursementForms() {
 }
 
 function bindReportActions(orders: OrderRow[], sales: DailySale[], expenses: DisbursementExpense[], foldRate: number) {
+  document.querySelector<HTMLButtonElement>('#generate-report')?.addEventListener('click', () => {
+    state.reportPreview = currentReportSelection();
+    void render();
+  });
+
   document.querySelector<HTMLFormElement>('#sales-form')?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const fd = new FormData(event.currentTarget);
@@ -1255,95 +1459,6 @@ function bindReportActions(orders: OrderRow[], sales: DailySale[], expenses: Dis
     });
   });
 
-  const selectedReportTypes = () => new Set(
-    Array.from(document.querySelectorAll<HTMLInputElement>('input[name="reportType"]:checked')).map((input) => input.value),
-  );
-  const selectedDateRange = () => ({
-    from: dateFromInput?.value || '0000-01-01',
-    to: dateToInput?.value || '9999-12-31',
-  });
-  const salesRows = () => {
-    const filteredOrders = orders.filter((order) => inRange(localDateFromIso(order.createdAt)));
-    const filteredSales = sales.filter((sale) => inRange(sale.saleDate));
-    const orderCashTotal = filteredOrders.reduce((sum, order) => sum + order.paidAmount, 0);
-    const orderGcashTotal = 0;
-    const manualCashTotal = filteredSales.reduce((sum, sale) => sum + sale.cashAmount, 0);
-    const manualGcashTotal = filteredSales.reduce((sum, sale) => sum + sale.gcashAmount, 0);
-    const totalCash = orderCashTotal + manualCashTotal;
-    const totalGcash = orderGcashTotal + manualGcashTotal;
-    const totalSales = totalCash + totalGcash;
-
-    return {
-      orderCashTotal,
-      orderGcashTotal,
-      manualCashTotal,
-      manualGcashTotal,
-      totalCash,
-      totalGcash,
-      totalSales,
-      rows: [
-        ['Type', 'Date', 'Number', 'Name', 'Cash', 'GCash', 'Total', 'Balance'],
-        ...filteredOrders.map((order) => ['Order', localDateFromIso(order.createdAt), order.ticket, order.customer, order.paidAmount, 0, order.paidAmount, order.balance]),
-        ...filteredSales.map((sale) => ['Manual Sale', sale.saleDate, sale.saleNumber, sale.notes ?? '', sale.cashAmount, sale.gcashAmount, sale.totalAmount, '']),
-        [],
-        ['Sales Summary', selectedDateRange().from, 'to', selectedDateRange().to, '', '', '', ''],
-        ['Order Cash', '', '', '', '', '', orderCashTotal, ''],
-        ['Order GCash', '', '', '', '', '', orderGcashTotal, ''],
-        ['Manual Cash', '', '', '', '', '', manualCashTotal, ''],
-        ['Manual GCash', '', '', '', '', '', manualGcashTotal, ''],
-        ['Total Cash', '', '', '', '', '', totalCash, ''],
-        ['Total GCash', '', '', '', '', '', totalGcash, ''],
-        ['Total Sales', '', '', '', '', '', totalSales, ''],
-      ],
-    };
-  };
-  const disbursementRows = () => {
-    const filteredExpenses = expenses.filter((expense) => inRange(expense.expenseDate));
-    const filteredFoldPayouts = foldPayoutRowsFromOrders(
-      orders.filter((order) => inRange(localDateFromIso(order.createdAt))),
-      foldRate,
-    );
-    const totalExpenses = filteredExpenses.reduce((sum, expense) => sum + expense.amount, 0);
-    const totalFoldPayouts = filteredFoldPayouts.reduce((sum, row) => sum + row.total, 0);
-    const totalDisbursement = totalExpenses + totalFoldPayouts;
-
-    return {
-      totalExpenses,
-      totalFoldPayouts,
-      totalDisbursement,
-      rows: [
-        ['Type', 'Date', 'Number', 'Name', 'Cash', 'GCash', 'Total', 'Balance'],
-        ...filteredExpenses.map((expense) => ['Expense', expense.expenseDate, expense.number, expense.name, '', '', expense.amount, '']),
-        ...filteredFoldPayouts.map((row) => ['Fold Payout', selectedDateRange().from, `${row.folds} fold(s)`, row.staffName, '', '', row.total, '']),
-        [],
-        ['Disbursement Summary', selectedDateRange().from, 'to', selectedDateRange().to, '', '', '', ''],
-        ['Expenses', '', '', '', '', '', totalExpenses, ''],
-        ['Fold Payouts', '', '', '', '', '', totalFoldPayouts, ''],
-        ['Total Disbursement', '', '', '', '', '', totalDisbursement, ''],
-      ],
-    };
-  };
-  const summaryRows = () => {
-    const sales = salesRows();
-    const disbursement = disbursementRows();
-    const profit = sales.totalSales - disbursement.totalDisbursement;
-    return [
-      ['Summary', selectedDateRange().from, 'to', selectedDateRange().to, '', '', '', ''],
-      ['Order Cash', '', '', '', '', '', sales.orderCashTotal, ''],
-      ['Order GCash', '', '', '', '', '', sales.orderGcashTotal, ''],
-      ['Manual Cash', '', '', '', '', '', sales.manualCashTotal, ''],
-      ['Manual GCash', '', '', '', '', '', sales.manualGcashTotal, ''],
-      ['Total Cash', '', '', '', '', '', sales.totalCash, ''],
-      ['Total GCash', '', '', '', '', '', sales.totalGcash, ''],
-      ['Total Sales', '', '', '', '', '', sales.totalSales, ''],
-      ['Total Disbursement', '', '', '', '', '', disbursement.totalDisbursement, ''],
-      ['Profit', '', '', '', '', '', profit, ''],
-    ];
-  };
-  const inRange = (date: string) => {
-    const range = selectedDateRange();
-    return date >= range.from && date <= range.to;
-  };
   const workbookFromSheets = (sheets: Array<{ name: string; rows: Array<Array<string | number>> }>) => {
     const xmlEscape = (value: string | number | null | undefined) => String(value ?? '')
       .replaceAll('&', '&amp;')
@@ -1435,14 +1550,14 @@ function bindReportActions(orders: OrderRow[], sales: DailySale[], expenses: Dis
 </Workbook>`;
   };
   const reportFile = () => {
-    const range = selectedDateRange();
-    const types = selectedReportTypes();
+    const selection = currentReportSelection();
+    const report = buildReportData(orders, sales, expenses, foldRate, selection);
     const sheets: Array<{ name: string; rows: Array<Array<string | number>> }> = [];
-    if (types.has('sales')) sheets.push({ name: 'Sales Report', rows: salesRows().rows });
-    if (types.has('disbursement')) sheets.push({ name: 'Disbursement', rows: disbursementRows().rows });
-    if (types.has('summary')) sheets.push({ name: 'Summary', rows: summaryRows() });
-    const html = workbookFromSheets(sheets.length ? sheets : [{ name: 'Summary', rows: summaryRows() }]);
-    const fileName = `laba101-report-${range.from}-to-${range.to}.xls`;
+    if (report.selectedTypes.has('sales')) sheets.push({ name: 'Sales Report', rows: report.salesRows().rows });
+    if (report.selectedTypes.has('disbursement')) sheets.push({ name: 'Disbursement', rows: report.disbursementRows().rows });
+    if (report.selectedTypes.has('summary')) sheets.push({ name: 'Summary', rows: report.summaryRows() });
+    const html = workbookFromSheets(sheets.length ? sheets : [{ name: 'Summary', rows: report.summaryRows() }]);
+    const fileName = `laba101-report-${selection.from}-to-${selection.to}.xls`;
     return new File([html], fileName, { type: 'application/vnd.ms-excel' });
   };
   const saveReportToDevice = async () => {
@@ -1464,7 +1579,7 @@ function bindReportActions(orders: OrderRow[], sales: DailySale[], expenses: Dis
   };
   const downloadReport = () => {
     const html = reportFile();
-    const range = selectedDateRange();
+    const range = currentReportSelection();
     const fileName = `laba101-report-${range.from}-to-${range.to}.xls`;
     const blob = html;
     const url = URL.createObjectURL(blob);
@@ -1495,8 +1610,8 @@ function bindReportActions(orders: OrderRow[], sales: DailySale[], expenses: Dis
           alert('Please configure a report email in Settings first.');
           return;
         }
-        const range = selectedDateRange();
-        const title = `Laba101 report ${range.from} to ${range.to}`;
+        const selection = currentReportSelection();
+        const title = `Laba101 report ${selection.from} to ${selection.to}`;
         if (Capacitor.isNativePlatform()) {
           const saved = await saveReportToDevice();
           try {
@@ -1517,7 +1632,7 @@ function bindReportActions(orders: OrderRow[], sales: DailySale[], expenses: Dis
           }
         } else {
           const fileName = downloadReport();
-          const body = `Hi,\n\nPlease find the attached Laba101 report file: ${fileName}\n\nDate range: ${range.from} to ${range.to}`;
+          const body = `Hi,\n\nPlease find the attached Laba101 report file: ${fileName}\n\nDate range: ${selection.from} to ${selection.to}`;
           const mailto = `mailto:${email}?subject=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}`;
           setTimeout(() => { window.location.href = mailto; }, 800);
           alert(`Report downloaded as "${fileName}".\nYour email app will open — please attach the file and send.`);
@@ -1535,6 +1650,20 @@ function bindReportActions(orders: OrderRow[], sales: DailySale[], expenses: Dis
   });
   document.querySelector<HTMLButtonElement>('#email-report')?.addEventListener('click', async () => {
     await shareOrDownloadReport('email');
+  });
+}
+
+function bindCustomerSearch() {
+  document.querySelector<HTMLFormElement>('#customer-search-form')?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const fd = new FormData(event.currentTarget);
+    state.customerSearch = String(fd.get('customerSearch') ?? '').trim();
+    void render();
+  });
+
+  document.querySelector<HTMLButtonElement>('#customer-search-clear')?.addEventListener('click', () => {
+    state.customerSearch = '';
+    void render();
   });
 }
 

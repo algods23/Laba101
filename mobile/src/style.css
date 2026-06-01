@@ -521,37 +521,72 @@ button {
   letter-spacing: 0.08em;
 }
 
-.mini-chart {
-  height: 320px;
+.chart-shell {
+  width: 100%;
+  overflow-x: auto;
+  padding-bottom: 6px;
+}
+
+.mini-chart.revenue-chart {
+  width: 100%;
+  min-width: 100%;
+  height: 300px;
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   align-items: end;
-  gap: 2px;
-  margin-top: 22px;
+  gap: 8px;
+  margin-top: 18px;
   border-bottom: 2px solid #ccd6e8;
   background: repeating-linear-gradient(to top, transparent, transparent 57px, #d9e0ec 58px);
 }
 
-.mini-chart span {
-  display: block;
-  height: 3px;
-  border-radius: 999px 999px 0 0;
-  background: var(--navy);
+.chart-bar {
+  display: grid;
+  align-content: end;
+  justify-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
-.mini-chart .is-today {
-  height: 280px;
-  background: linear-gradient(to top, rgba(6, 26, 66, 0.18), rgba(6, 26, 66, 0.02));
-  border-top: 5px solid var(--navy);
+.chart-bar span {
+  width: 100%;
+  max-width: 28px;
+  min-width: 12px;
+  border-radius: 999px 999px 0 0;
+  background: linear-gradient(180deg, #2f61c8 0%, #061a42 100%);
+  box-shadow: 0 8px 18px rgba(6, 26, 66, 0.18);
+}
+
+.chart-bar.is-today span {
+  background: linear-gradient(180deg, rgba(47, 97, 200, 0.92) 0%, rgba(6, 26, 66, 0.92) 100%);
+}
+
+.chart-bar strong {
+  display: block;
+  max-width: 100%;
+  color: var(--navy);
+  font-size: 0.72rem;
+  line-height: 1.25;
+  text-align: center;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .chart-days {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 8px;
   color: var(--muted);
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   padding-top: 10px;
+}
+
+.chart-days span {
+  min-width: 0;
+  text-align: center;
+  white-space: normal;
+  line-height: 1.2;
+  word-break: break-word;
 }
 
 .activity-list {
@@ -585,6 +620,202 @@ button {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 420px;
   gap: 30px;
+}
+
+.report-preview {
+  display: grid;
+  gap: 18px;
+}
+
+.report-preview article {
+  display: grid;
+  gap: 12px;
+}
+
+.report-preview-table {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.report-preview-table .table-head,
+.report-preview-table .table-row {
+  min-width: 820px;
+  grid-template-columns: 90px 102px 110px 1.3fr 88px 88px 96px 88px;
+}
+
+.report-preview-table .table-row {
+  align-items: start;
+}
+
+.report-preview-table .table-row > div {
+  min-width: 0;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.report-summary-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.report-summary-list div {
+  min-height: 72px;
+}
+
+.report-summary-list strong {
+  color: var(--navy);
+  font-size: 1rem;
+}
+
+.search-box {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.search-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.customer-stack {
+  display: grid;
+  gap: 14px;
+}
+
+.customer-card {
+  border: 1px solid var(--soft-line);
+  border-radius: 20px;
+  background: #fff;
+  padding: 16px;
+  box-shadow: 0 12px 30px rgba(6, 26, 66, 0.08);
+}
+
+.customer-card header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.customer-card header p {
+  margin: 6px 0 0;
+  color: var(--muted);
+}
+
+.customer-card header span {
+  color: var(--navy);
+  font-weight: 900;
+  font-size: 0.82rem;
+}
+
+.customer-orders {
+  display: grid;
+  gap: 10px;
+}
+
+.customer-order-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: start;
+  border-top: 1px solid #edf1fb;
+  padding-top: 10px;
+}
+
+.customer-order-row strong {
+  display: block;
+  color: var(--navy);
+}
+
+.customer-order-row span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.86rem;
+  margin-top: 3px;
+}
+
+.service-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+}
+
+.service-card {
+  border: 1px solid var(--soft-line);
+  border-radius: 20px;
+  background: #fff;
+  padding: 16px;
+  box-shadow: 0 12px 30px rgba(6, 26, 66, 0.08);
+}
+
+.service-card header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.service-card header strong {
+  color: var(--navy);
+}
+
+.service-card header span,
+.service-meta {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.service-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.service-fields div {
+  border: 1px solid #edf1fb;
+  border-radius: 14px;
+  background: #f8fbff;
+  padding: 10px 12px;
+}
+
+.service-fields span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-transform: lowercase;
+  letter-spacing: 0.06em;
+}
+
+.service-fields strong {
+  display: block;
+  color: var(--navy);
+  margin-top: 3px;
+}
+
+.navbar-time {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 0;
+  color: var(--navy);
+  font-weight: 800;
+  text-align: right;
+}
+
+.navbar-time strong {
+  font-size: 0.98rem;
+}
+
+.navbar-time span {
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.2;
 }
 
 .date-scopes {
@@ -1241,6 +1472,11 @@ legend {
   .report-grid {
     grid-template-columns: 1fr;
   }
+
+  .report-preview-table .table-head,
+  .report-preview-table .table-row {
+    min-width: 760px;
+  }
 }
 
 @media (max-width: 860px) {
@@ -1495,17 +1731,30 @@ legend {
     grid-template-columns: 1fr;
   }
 
-  .mini-chart {
-    height: 190px;
+  .mini-chart.revenue-chart {
+    height: 180px;
+    gap: 6px;
   }
 
-  .mini-chart .is-today {
-    height: 160px;
+  .chart-bar span {
+    max-width: 20px;
+    min-width: 8px;
   }
 
   .chart-days {
-    overflow-x: auto;
-    min-width: 520px;
+    gap: 6px;
+    font-size: 0.7rem;
+  }
+
+  .service-fields,
+  .report-summary-list {
+    grid-template-columns: 1fr;
+  }
+
+  .report-preview-table .table-head,
+  .report-preview-table .table-row {
+    min-width: 680px;
+    grid-template-columns: 82px 96px 100px 1.2fr 78px 78px 88px 78px;
   }
 
   input,
