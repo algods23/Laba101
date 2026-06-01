@@ -58,7 +58,7 @@ let dashboardClockTimer: number | undefined;
 
 type TabKey = 'dashboard' | 'orders' | 'archived' | 'customers' | 'pricing' | 'disbursements' | 'reports' | 'inventory' | 'maintenance' | 'staff' | 'settings';
 
-type ReportType = 'sales' | 'disbursement' | 'summary';
+type ReportType = 'sales' | 'disbursement' | 'fold_count' | 'summary';
 
 type ReportPreviewState = {
   from: string;
@@ -116,15 +116,14 @@ function cleanAddonName(name: string) {
   return name.replace(/^(add[- ]?on|additional)\s+/i, '').trim();
 }
 
-function foldPayoutRowsFromOrders(orders: OrderRow[], foldRate: number) {
-  const grouped = new Map<string, { staffName: string; folds: number; rate: number; total: number }>();
+function foldCountRowsFromOrders(orders: OrderRow[]) {
+  const grouped = new Map<string, { staffName: string; folds: number }>();
   orders
     .filter((order) => order.workflowCompleted.includes('fold') && order.foldedByName)
     .forEach((order) => {
       const staffName = order.foldedByName as string;
-      const row = grouped.get(staffName) ?? { staffName, folds: 0, rate: foldRate, total: 0 };
+      const row = grouped.get(staffName) ?? { staffName, folds: 0 };
       row.folds += 1;
-      row.total = Number((row.folds * row.rate).toFixed(2));
       grouped.set(staffName, row);
     });
   return Array.from(grouped.values());
@@ -161,7 +160,7 @@ function currentReportSelection(): ReportPreviewState {
   const dateToInput = document.querySelector<HTMLInputElement>('[data-date-to]');
   const types = Array.from(document.querySelectorAll<HTMLInputElement>('input[name="reportType"]:checked'))
     .map((input) => input.value)
-    .filter((value): value is ReportType => value === 'sales' || value === 'disbursement' || value === 'summary');
+    .filter((value): value is ReportType => value === 'sales' || value === 'disbursement' || value === 'fold_count' || value === 'summary');
 
   return {
     from: dateFromInput?.value || '0000-01-01',
@@ -179,7 +178,7 @@ function buildReportData(orders: OrderRow[], sales: DailySale[], expenses: Disbu
   const salesOrders = orders.filter((order) => reportSelectionInRange(localDateFromIso(order.createdAt), selection));
   const manualSales = sales.filter((sale) => reportSelectionInRange(sale.saleDate, selection));
   const filteredExpenses = expenses.filter((expense) => reportSelectionInRange(expense.expenseDate, selection));
-  const filteredFoldPayouts = foldPayoutRowsFromOrders(salesOrders, foldRate);
+  const filteredFoldCounts = foldCountRowsFromOrders(salesOrders);
 
   const orderCashTotal = salesOrders.reduce((sum, order) => sum + order.paidAmount, 0);
   const manualCashTotal = manualSales.reduce((sum, sale) => sum + sale.cashAmount, 0);
@@ -189,8 +188,7 @@ function buildReportData(orders: OrderRow[], sales: DailySale[], expenses: Disbu
   const totalGcash = orderGcashTotal + manualGcashTotal;
   const totalSales = totalCash + totalGcash;
   const totalExpenses = filteredExpenses.reduce((sum, expense) => sum + expense.amount, 0);
-  const totalFoldPayouts = filteredFoldPayouts.reduce((sum, row) => sum + row.total, 0);
-  const totalDisbursement = totalExpenses + totalFoldPayouts;
+  const totalDisbursement = totalExpenses;
   const profit = totalSales - totalDisbursement;
 
   const salesRows = () => ({
@@ -219,20 +217,23 @@ function buildReportData(orders: OrderRow[], sales: DailySale[], expenses: Disbu
 
   const disbursementRows = () => ({
     totalExpenses,
-    totalFoldPayouts,
     totalDisbursement,
     rows: [
       ['Type', 'Date', 'Number', 'Name', 'Cash', 'GCash', 'Total', 'Balance'],
       ...filteredExpenses.map((expense) => ['Expense', expense.expenseDate, expense.number, expense.name, '', '', expense.amount, '']),
       [],
-      ['Fold Payout Records', selection.from, 'to', selection.to, '', '', '', ''],
-      ['Staff', 'Fold Count', 'Rate', 'Total', '', '', '', ''],
-      ...filteredFoldPayouts.map((row) => [row.staffName, row.folds, row.rate, row.total, '', '', '', '']),
-      [],
       ['Disbursement Summary', selection.from, 'to', selection.to, '', '', '', ''],
       ['Expenses', '', '', '', '', '', totalExpenses, ''],
-      ['Fold Payouts', '', '', '', '', '', totalFoldPayouts, ''],
       ['Total Disbursement', '', '', '', '', '', totalDisbursement, ''],
+    ],
+  });
+
+  const foldCountRows = () => ({
+    rows: [
+      ['Staff', 'Fold Count'],
+      ...filteredFoldCounts.map((row) => [row.staffName, row.folds]),
+      [],
+      ['Total Folds', filteredFoldCounts.reduce((sum, row) => sum + row.folds, 0)],
     ],
   });
 
@@ -258,6 +259,7 @@ function buildReportData(orders: OrderRow[], sales: DailySale[], expenses: Disbu
     selectedTypes,
     salesRows,
     disbursementRows,
+    foldCountRows,
     summaryRows,
     profit,
   };
@@ -334,8 +336,7 @@ async function render() {
   const paidToday = data.orders.filter((order) => localDateFromIso(order.createdAt) === today()).reduce((sum, order) => sum + order.paidAmount, 0);
   const manualSales = data.sales.reduce((sum, sale) => sum + sale.totalAmount, 0);
   const salesTotal = orderSales + manualSales;
-  const foldPayoutTotal = foldPayoutRowsFromOrders(data.orders, data.foldRate).reduce((sum, row) => sum + row.total, 0);
-  const disbursementTotal = data.expenses.reduce((sum, row) => sum + row.amount, 0) + foldPayoutTotal;
+  const disbursementTotal = data.expenses.reduce((sum, row) => sum + row.amount, 0);
   const profit = salesTotal - disbursementTotal;
 
   app.innerHTML = `
@@ -950,6 +951,7 @@ function renderReports(orders: OrderRow[], sales: DailySale[], expenses: Disburs
           <div class="report-checks">
             <label><input type="checkbox" name="reportType" value="sales" checked /> Sales reports</label>
             <label><input type="checkbox" name="reportType" value="disbursement" checked /> Disbursement reports</label>
+            <label><input type="checkbox" name="reportType" value="fold_count" /> Fold Count</label>
             <label><input type="checkbox" name="reportType" value="summary" checked /> Summary</label>
           </div>
         </div>
@@ -979,6 +981,14 @@ function renderReports(orders: OrderRow[], sales: DailySale[], expenses: Disburs
             <div class="table wide-table report-preview-table">
               <div class="table-head report-table-head"><div>Type</div><div>Date</div><div>Number</div><div>Name</div><div>Cash</div><div>GCash</div><div>Total</div><div>Balance</div></div>
               ${preview.disbursementRows().rows.slice(1).map((row) => `<div class="table-row report-table-row">${row.map((value) => `<div>${escapeHtml(value ?? '')}</div>`).join('')}</div>`).join('')}
+            </div>
+          </article>` : ''}
+        ${preview.selectedTypes.has('fold_count') ? `
+          <article>
+            ${sectionTitle('Fold Count preview', `${preview.selection.from} to ${preview.selection.to}`)}
+            <div class="table report-preview-table">
+              <div class="table-head"><div>Staff</div><div>Fold Count</div></div>
+              ${preview.foldCountRows().rows.slice(1).map((row) => `<div class="table-row">${row.map((value) => `<div>${escapeHtml(value ?? '')}</div>`).join('')}</div>`).join('')}
             </div>
           </article>` : ''}
         ${preview.selectedTypes.has('summary') ? `
@@ -1547,6 +1557,10 @@ function bindReportActions(orders: OrderRow[], sales: DailySale[], expenses: Dis
         return [130, 115, 165, 190, 95, 105, 105, 105];
       }
 
+      if (sheetName === 'Fold Count') {
+        return [220, 125];
+      }
+
       return [155, 125, 125, 125, 95, 95, 115, 115];
     };
     const sheetXml = sheets.map((sheet) => {
@@ -1555,7 +1569,7 @@ function bindReportActions(orders: OrderRow[], sales: DailySale[], expenses: Dis
         .join('');
       const rowXml = sheet.rows.map((row) => {
         if (!row.length) return '<Row ss:Height="10" ss:StyleID="BorderRow"><Cell ss:StyleID="BorderCell"><Data ss:Type="String">&nbsp;</Data></Cell></Row>';
-        const isHeaderRow = row[0] === 'Type' || row[0] === 'Summary' || row[0] === 'Sales Summary' || row[0] === 'Disbursement Summary';
+        const isHeaderRow = row[0] === 'Type' || row[0] === 'Summary' || row[0] === 'Sales Summary' || row[0] === 'Disbursement Summary' || row[0] === 'Staff';
         const rowStyle = isHeaderRow ? 'HeaderRow' : 'BorderRow';
         const cellStyle = isHeaderRow ? 'HeaderCell' : 'BorderCell';
         const rowHeight = isHeaderRow ? 26 : 22;
@@ -1627,6 +1641,7 @@ function bindReportActions(orders: OrderRow[], sales: DailySale[], expenses: Dis
     const sheets: Array<{ name: string; rows: Array<Array<string | number>> }> = [];
     if (report.selectedTypes.has('sales')) sheets.push({ name: 'Sales Report', rows: report.salesRows().rows });
     if (report.selectedTypes.has('disbursement')) sheets.push({ name: 'Disbursement', rows: report.disbursementRows().rows });
+    if (report.selectedTypes.has('fold_count')) sheets.push({ name: 'Fold Count', rows: report.foldCountRows().rows });
     if (report.selectedTypes.has('summary')) sheets.push({ name: 'Summary', rows: report.summaryRows() });
     const html = workbookFromSheets(sheets.length ? sheets : [{ name: 'Summary', rows: report.summaryRows() }]);
     const fileName = `laba101-report-${selection.from}-to-${selection.to}.xls`;
