@@ -588,6 +588,37 @@ class PageController extends Controller
         return back()->with('status', 'Report sent to ' . $reportEmail . ' successfully!');
     }
 
+    public function revolvingFund(): View
+    {
+        // Calculate the total revolving fund.
+        // It seems the user wants the cash-on-hand of sales with status "revolving" to add to a box.
+        $revolvingTotal = DailySale::query()
+            ->where('status', 'revolving')
+            ->sum('cash_amount');
+            
+        // Table of daily summary
+        $dailySales = DailySale::query()
+            ->latest('sale_date')
+            ->get();
+            
+        return view('pages.revolving-fund', [
+            'revolvingTotal' => $revolvingTotal,
+            'dailySales' => $dailySales,
+        ]);
+    }
+
+    public function updateDailySaleStatus(Request $request, DailySale $dailySale): RedirectResponse
+    {
+        $validated = $request->validate([
+            'status' => ['required', 'string', 'in:revolving,endorsed'],
+            'endorsed_to' => ['required_if:status,endorsed', 'nullable', 'string', 'max:255'],
+        ]);
+
+        $dailySale->update($validated);
+
+        return redirect()->route('revolving-fund.index')->with('status', 'Status updated successfully.');
+    }
+
     public function placeholder(string $page): View
     {
         return view('pages.placeholder', [

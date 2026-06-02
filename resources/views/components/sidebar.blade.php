@@ -11,6 +11,7 @@
         ['label' => 'Inventory', 'route' => 'inventory.index', 'icon' => 'boxes'],
         ['label' => 'Maintenance', 'route' => 'maintenance.index', 'icon' => 'wrench'],
         ['label' => 'Staff', 'route' => 'staff.index', 'icon' => 'badge'],
+        ['label' => 'Revolving Fund', 'route' => 'revolving-fund.index', 'icon' => 'refresh-cw'],
         ['label' => 'Settings', 'route' => 'settings.index', 'icon' => 'settings'],
     ];
 

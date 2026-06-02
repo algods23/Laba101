@@ -18,6 +18,8 @@ class DailySale extends Model
         'gcash_amount',
         'notes',
         'branch',
+        'status',
+        'endorsed_to',
     ];
 
     protected function casts(): array
