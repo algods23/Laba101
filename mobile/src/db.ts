@@ -71,7 +71,7 @@ export type OrderRow = {
   totalAmount: number;
   paidAmount: number;
   balance: number;
-  extras: Array<{ id: number; name: string; price: number }>;
+  extras: Array<{ id: number; name: string; price: number; quantity?: number; total?: number }>;
   notes: string | null;
   foldedBy: number | null;
   foldedByName: string | null;
@@ -154,7 +154,7 @@ type PricingResult = {
   allowedKg: number;
   extraKg: number;
   warning: string | null;
-  extras: Array<{ id: number; name: string; price: number }>;
+  extras: Array<{ id: number; name: string; price: number; quantity: number; total: number }>;
 };
 
 function cleanAddonName(name: string) {
@@ -168,6 +168,7 @@ let nativeDb: SQLiteDBConnection | null = null;
 
 const seedStaff: Staff[] = [
   { id: 1, name: 'Laba101 Admin', email: 'admin@laba101.test', password: 'password', role: 'admin', branch: 'Main Store' },
+  { id: 2, name: 'Gensan Staff', email: 'staff@laba101.gensan', password: 'password', role: 'staff', branch: 'Gensan Branch' },
 ];
 
 const seedCustomers: Customer[] = [];
@@ -178,9 +179,9 @@ const seedServices: LaundryService[] = [
   serviceSeed(3, 'Self Service Wash', 'Max of 8kg per load.', 'Self Service', 'order', 60, 8, null, ['Wash'], 0, 1),
   serviceSeed(4, 'Self Service Dry', 'Regular time: 40 mins drying time.', 'Self Service', 'order', 70, 8, 40, ['Dry'], 0, 1),
   serviceSeed(5, 'Dry Only', 'Standard drying rate.', 'Dry Only', 'order', 70, 8, 40, ['Dry'], 0, 1),
-  serviceSeed(6, 'Additional Dry 10 mins', 'Additional drying time.', 'Dry Only', 'order', 30, 8, 10, ['Dry'], 0, 1),
-  serviceSeed(7, 'Additional Dry 20 mins', 'Additional drying time.', 'Dry Only', 'order', 50, 8, 20, ['Dry'], 0, 1),
-  serviceSeed(8, 'Additional Dry 40 mins', 'Additional drying time.', 'Dry Only', 'order', 70, 8, 40, ['Dry'], 0, 1),
+  serviceSeed(6, 'Additional Dry 10 mins', 'Additional drying time.', 'Add-on', 'addon', 30, 8, 10, ['Dry'], 0, 1),
+  serviceSeed(7, 'Additional Dry 20 mins', 'Additional drying time.', 'Add-on', 'addon', 50, 8, 20, ['Dry'], 0, 1),
+  serviceSeed(8, 'Additional Dry 40 mins', 'Additional drying time.', 'Add-on', 'addon', 70, 8, 40, ['Dry'], 0, 1),
   serviceSeed(9, 'Additional Zonrox', 'Extra Zonrox bleach add-on per load.', 'Add-on', 'addon', 25, 0, null, ['Zonrox'], 0, 0),
   serviceSeed(10, 'Additional Fabcon', 'Extra Fabcon fabric conditioner add-on per load.', 'Add-on', 'addon', 25, 0, null, ['Fabcon'], 0, 0),
   serviceSeed(11, 'Comforter / Bulky Load', 'Comforter 4kg max per load. Thin blankets, bedsheets, bath towels, pillow cases and curtains: 6kg max per load.', 'Comforter', 'order', 200, 8, 40, ['Wash', 'Dry', 'Fold'], 0, 24),
@@ -337,6 +338,26 @@ async function addColumnIfMissing(db: SQLiteDBConnection, table: string, column:
   }
 }
 
+function syncBrowserSeedStaff() {
+  const items = readBrowser<Staff[]>('staff', seedStaff);
+  const byId = new Map(items.map((row) => [row.id, row]));
+  let changed = false;
+  for (const account of seedStaff) {
+    const existing = byId.get(account.id);
+    if (!existing) {
+      byId.set(account.id, { ...account, isActive: 1 });
+      changed = true;
+      continue;
+    }
+    const updated = { ...existing, name: account.name, email: account.email, password: account.password, role: account.role, branch: account.branch, isActive: 1 };
+    if (JSON.stringify(updated) !== JSON.stringify(existing)) {
+      byId.set(account.id, updated);
+      changed = true;
+    }
+  }
+  if (changed) writeBrowser('staff', Array.from(byId.values()).sort((a, b) => a.id - b.id));
+}
+
 async function resetBrowserToFreshStart() {
   if (localStorage.getItem(browserKey(freshStartResetKey))) return;
 
@@ -356,17 +377,21 @@ async function resetBrowserToFreshStart() {
   writeBrowser(freshStartResetKey, true);
 }
 
-async function ensureNativeSeedAdmin(db: SQLiteDBConnection) {
-  const admin = seedStaff[0];
-  const existing = await db.query('SELECT id FROM staff WHERE id = ?', [admin.id]);
-  if ((existing.values ?? []).length > 0) {
+async function ensureNativeSeedStaff(db: SQLiteDBConnection) {
+  for (const account of seedStaff) {
+    const existing = await db.query('SELECT id FROM staff WHERE id = ?', [account.id]);
+    if ((existing.values ?? []).length > 0) {
+      await db.run(
+        'UPDATE staff SET name = ?, email = ?, password = ?, role = ?, branch = ?, isActive = 1 WHERE id = ?',
+        [account.name, account.email, account.password, account.role, account.branch, account.id],
+      );
+      continue;
+    }
     await db.run(
-      'UPDATE staff SET name = ?, email = ?, password = COALESCE(NULLIF(password, ""), ?), role = ?, branch = ?, isActive = 1 WHERE id = ?',
-      [admin.name, admin.email, admin.password, admin.role, admin.branch, admin.id],
+      'INSERT INTO staff (id, name, email, password, role, branch, isActive) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [account.id, account.name, account.email, account.password, account.role, account.branch, 1],
     );
-    return;
   }
-  await db.run('INSERT INTO staff (id, name, email, password, role, branch, isActive) VALUES (?, ?, ?, ?, ?, ?, ?)', [admin.id, admin.name, admin.email, admin.password, admin.role, admin.branch, 1]);
 }
 
 async function ensureNativeSeedMachines(db: SQLiteDBConnection) {
@@ -395,9 +420,9 @@ async function resetNativeToFreshStart(db: SQLiteDBConnection) {
     DELETE FROM disbursement_expenses;
     DELETE FROM daily_sales;
     DELETE FROM revolving_history;
-    DELETE FROM staff WHERE id <> 1;
+    DELETE FROM staff WHERE id NOT IN (1, 2);
   `);
-  await ensureNativeSeedAdmin(db);
+  await ensureNativeSeedStaff(db);
   await ensureNativeSeedMachines(db);
   await ensureNativeSeedSettings(db);
   await db.run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [freshStartResetKey, nowIso()]);
@@ -424,6 +449,7 @@ async function ensureSchema() {
       writeBrowser('seeded_v4', true);
     }
     await syncBrowserSeedLaundryCatalog();
+    syncBrowserSeedStaff();
     if (!localStorage.getItem(browserKey('seeded_v4'))) writeBrowser('seeded_v4', true);
     return;
   }
@@ -533,6 +559,7 @@ async function ensureSchema() {
   }
 
   await syncSeedLaundryCatalog(db);
+  await ensureNativeSeedStaff(db);
   await resetNativeToFreshStart(db);
 }
 
@@ -784,12 +811,20 @@ export async function saveItemCategory(input: Omit<ItemCategory, 'id'> & { id?: 
   else await db.run('INSERT INTO item_categories (name, maxKg, additionalFee, isActive) VALUES (?, ?, ?, ?)', [input.name, input.maxKg, input.additionalFee, input.isActive]);
 }
 
-export function calculatePricing(service: LaundryService, category: ItemCategory, weightKg: number, addons: LaundryService[]): PricingResult {
+type AddonInput = LaundryService & { quantity?: number };
+
+export function calculatePricing(service: LaundryService, category: ItemCategory, weightKg: number, addons: AddonInput[]): PricingResult {
   const allowedKg = Number(category.maxKg);
   const extraKg = Math.max(0, weightKg - allowedKg);
   const additionalCharge = 0;
-  const extraServiceAmount = addons.reduce((sum, addon) => sum + Number(addon.price), 0);
-  const extras = addons.map((addon) => ({ id: addon.id, name: cleanAddonName(addon.name), price: Number(addon.price) }));
+  const extras = addons
+    .map((addon) => {
+      const quantity = Math.max(0, Number(addon.quantity ?? 1));
+      const price = Number(addon.price);
+      return { id: addon.id, name: cleanAddonName(addon.name), price, quantity, total: Number((price * quantity).toFixed(2)) };
+    })
+    .filter((addon) => addon.quantity > 0);
+  const extraServiceAmount = extras.reduce((sum, addon) => sum + addon.total, 0);
   const totalAmount = Number((Number(service.price) + additionalCharge + extraServiceAmount).toFixed(2));
   return {
     price: Number(service.price),
@@ -830,13 +865,20 @@ export async function listOrders(branch: string): Promise<OrderRow[]> {
   return (result.values ?? []).map((row) => hydrateOrder(row as Record<string, unknown>));
 }
 
-export async function createOrder(input: { customerId?: number; customerName: string; customerPhone?: string | null; serviceId: number; itemCategoryId: number; branch: string; weightKg: number; addonIds: number[]; paidAmount: number; paymentMethod: 'cash' | 'gcash'; paymentReference?: string | null; notes?: string | null }) {
+export async function createOrder(input: { customerId?: number; customerName: string; customerPhone?: string | null; serviceId: number; itemCategoryId?: number; branch: string; weightKg?: number; addonIds?: number[]; addonQuantities?: Record<number, number>; paidAmount: number; paymentMethod: 'cash' | 'gcash'; paymentReference?: string | null; notes?: string | null }) {
   const [services, categories] = await Promise.all([listServices(), listItemCategories()]);
   const service = services.find((item) => item.id === input.serviceId);
-  const category = categories.find((item) => item.id === input.itemCategoryId);
+  const category = categories.find((item) => item.id === input.itemCategoryId)
+    ?? categories.find((item) => item.name.toLowerCase() === (service?.category ?? '').toLowerCase())
+    ?? categories.find((item) => item.name === 'Regular Clothes')
+    ?? categories[0];
   if (!service || !category) throw new Error('Service or item category is missing.');
-  const addons = services.filter((item) => input.addonIds.includes(item.id));
-  const pricing = calculatePricing(service, category, input.weightKg, addons);
+  const addonQuantities = input.addonQuantities ?? Object.fromEntries((input.addonIds ?? []).map((id) => [id, 1]));
+  const addons = services
+    .filter((item) => item.serviceType === 'addon' && Number(addonQuantities[item.id] ?? 0) > 0)
+    .map((item) => ({ ...item, quantity: Number(addonQuantities[item.id] ?? 0) }));
+  const weightKg = input.weightKg ?? Math.max(1, Number(service.maxKg || category.maxKg || 1));
+  const pricing = calculatePricing(service, category, weightKg, addons);
   if (pricing.extraKg > 0) throw new Error(pricing.warning ?? 'Weight exceeds the allowed limit.');
   const customer = await upsertCustomer({ id: input.customerId || undefined, name: input.customerName, phone: input.customerPhone ?? null });
   const tenderedAmount = Math.max(0, input.paidAmount);
@@ -853,7 +895,7 @@ export async function createOrder(input: { customerId?: number; customerName: st
     branch: input.branch,
     status: 'received',
     workflowCompleted: ['received'],
-    weightKg: input.weightKg,
+    weightKg,
     price: pricing.price,
     additionalCharge: pricing.additionalCharge,
     extraServiceAmount: pricing.extraServiceAmount,
@@ -970,18 +1012,91 @@ export async function listExpenses(): Promise<DisbursementExpense[]> {
   return (result.values ?? []) as DisbursementExpense[];
 }
 
-export async function createExpense(input: { expenseDate: string; name: string; category: string; description: string; amount: number }) {
+function parseDisbursementSequence(value: string) {
+  const match = /^DISB-(\d+)$/i.exec(String(value ?? '').trim());
+  return match ? Number(match[1]) : 0;
+}
+
+function parseRevolvingAddSequence(value: string) {
+  const match = /^REV-(\d+)$/i.exec(String(value ?? '').trim());
+  return match ? Number(match[1]) : 0;
+}
+
+async function maxDisbursementSequence() {
+  let max = 0;
+  if (!Capacitor.isNativePlatform()) {
+    const expenses = readBrowser<DisbursementExpense[]>('expenses', seedExpenses);
+    const revolving = readBrowser<RevolvingHistory[]>('revolving_history', seedRevolvingHistory);
+    for (const expense of expenses) max = Math.max(max, parseDisbursementSequence(expense.number));
+    for (const row of revolving) {
+      if (row.type === 'disbursement') max = Math.max(max, parseDisbursementSequence(row.revolvingNumber));
+    }
+    return max;
+  }
+  const db = await ensureNativeDb();
+  const expenseResult = await db.query('SELECT number FROM disbursement_expenses');
+  const revolvingResult = await db.query("SELECT revolvingNumber as number FROM revolving_history WHERE type = 'disbursement'");
+  for (const row of [...(expenseResult.values ?? []), ...(revolvingResult.values ?? [])]) {
+    max = Math.max(max, parseDisbursementSequence(String((row as { number: string }).number)));
+  }
+  return max;
+}
+
+async function nextDisbursementNumber() {
+  const next = (await maxDisbursementSequence()) + 1;
+  return `DISB-${String(next).padStart(2, '0')}`;
+}
+
+async function nextRevolvingAddNumber() {
+  let max = 0;
+  if (!Capacitor.isNativePlatform()) {
+    const revolving = readBrowser<RevolvingHistory[]>('revolving_history', seedRevolvingHistory);
+    for (const row of revolving) {
+      if (row.type === 'add') max = Math.max(max, parseRevolvingAddSequence(row.revolvingNumber));
+    }
+    return `REV-${String(max + 1).padStart(2, '0')}`;
+  }
+  const db = await ensureNativeDb();
+  const result = await db.query("SELECT revolvingNumber FROM revolving_history WHERE type = 'add'");
+  for (const row of result.values ?? []) {
+    max = Math.max(max, parseRevolvingAddSequence(String((row as { revolvingNumber: string }).revolvingNumber)));
+  }
+  return `REV-${String(max + 1).padStart(2, '0')}`;
+}
+
+async function insertExpenseRecord(input: { expenseDate: string; number: string; name: string; category: string; description: string; amount: number }) {
   if (!Capacitor.isNativePlatform()) {
     const items = readBrowser<DisbursementExpense[]>('expenses', seedExpenses);
     const id = nextNumericId(items);
-    items.unshift({ id, expenseDate: input.expenseDate, number: `DISB-${String(id).padStart(2, '0')}`, name: input.name, category: input.category, description: input.description || null, amount: input.amount });
+    items.unshift({
+      id,
+      expenseDate: input.expenseDate,
+      number: input.number,
+      name: input.name,
+      category: input.category,
+      description: input.description || null,
+      amount: input.amount,
+    });
     writeBrowser('expenses', items);
     return;
   }
   const db = await ensureNativeDb();
-  const countResult = await db.query('SELECT COALESCE(MAX(id), 0) + 1 as id FROM disbursement_expenses');
-  const nextId = Number((countResult.values?.[0] as { id: number }).id);
-  await db.run('INSERT INTO disbursement_expenses (expenseDate, number, name, category, description, amount) VALUES (?, ?, ?, ?, ?, ?)', [input.expenseDate, `DISB-${String(nextId).padStart(2, '0')}`, input.name, input.category, input.description || null, input.amount]);
+  await db.run(
+    'INSERT INTO disbursement_expenses (expenseDate, number, name, category, description, amount) VALUES (?, ?, ?, ?, ?, ?)',
+    [input.expenseDate, input.number, input.name, input.category, input.description || null, input.amount],
+  );
+}
+
+export async function createExpense(input: { expenseDate: string; name: string; category: string; description: string; amount: number }) {
+  const number = await nextDisbursementNumber();
+  await insertExpenseRecord({
+    expenseDate: input.expenseDate,
+    number,
+    name: input.name,
+    category: input.category,
+    description: input.description,
+    amount: input.amount,
+  });
 }
 
 export async function listDailySales(): Promise<DailySale[]> {
@@ -1038,18 +1153,43 @@ export async function listRevolvingHistory(): Promise<RevolvingHistory[]> {
   return (result.values ?? []) as RevolvingHistory[];
 }
 
-export async function saveRevolvingHistory(input: { name: string; amount: number; category: string; description: string | null; type: 'disbursement' | 'add'; createdAt: string }) {
+export async function saveRevolvingHistory(input: {
+  name: string;
+  amount: number;
+  category: string;
+  description: string | null;
+  type: 'disbursement' | 'add';
+  createdAt: string;
+  expenseDate?: string;
+}) {
+  const revolvingNumber = input.type === 'disbursement'
+    ? await nextDisbursementNumber()
+    : await nextRevolvingAddNumber();
+
+  if (input.type === 'disbursement') {
+    const expenseDate = input.expenseDate ?? input.createdAt.slice(0, 10);
+    await insertExpenseRecord({
+      expenseDate,
+      number: revolvingNumber,
+      name: input.name,
+      category: input.category,
+      description: input.description ?? '',
+      amount: input.amount,
+    });
+  }
+
   if (!Capacitor.isNativePlatform()) {
     const items = readBrowser<RevolvingHistory[]>('revolving_history', seedRevolvingHistory);
     const id = nextNumericId(items);
-    items.unshift({ id, revolvingNumber: `REV-${String(id).padStart(2, '0')}`, ...input });
+    items.unshift({ id, revolvingNumber, ...input });
     writeBrowser('revolving_history', items);
     return;
   }
   const db = await ensureNativeDb();
-  const countResult = await db.query('SELECT COALESCE(MAX(id), 0) + 1 as id FROM revolving_history');
-  const nextId = Number((countResult.values?.[0] as { id: number }).id);
-  await db.run('INSERT INTO revolving_history (revolvingNumber, name, amount, category, description, type, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)', [`REV-${String(nextId).padStart(2, '0')}`, input.name, input.amount, input.category, input.description || null, input.type, input.createdAt]);
+  await db.run(
+    'INSERT INTO revolving_history (revolvingNumber, name, amount, category, description, type, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [revolvingNumber, input.name, input.amount, input.category, input.description || null, input.type, input.createdAt],
+  );
 }
 
 export async function listMachines(branch: string): Promise<Machine[]> {

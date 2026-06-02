@@ -60,9 +60,9 @@ if (!app) throw new Error('App root not found');
 
 let dashboardClockTimer: number | undefined;
 
-type TabKey = 'dashboard' | 'orders' | 'archived' | 'customers' | 'pricing' | 'disbursements' | 'reports' | 'inventory' | 'maintenance' | 'staff' | 'revolving' | 'settings';
+type TabKey = 'dashboard' | 'pos' | 'orders' | 'archived' | 'customers' | 'pricing' | 'disbursements' | 'reports' | 'inventory' | 'maintenance' | 'staff' | 'revolving' | 'settings';
 
-type ReportType = 'sales' | 'disbursement' | 'fold_count' | 'summary';
+type ReportType = 'sales' | 'disbursement' | 'fold_count' | 'revolving_fund' | 'summary';
 
 type ReportPreviewState = {
   from: string;
@@ -72,7 +72,8 @@ type ReportPreviewState = {
 
 const tabLabels: Record<TabKey, string> = {
   dashboard: 'Dashboard',
-  orders: 'POS / Orders',
+  pos: 'POS',
+  orders: 'Orders',
   archived: 'Archived Order',
   customers: 'Customers',
   pricing: 'Pricing Services',
@@ -105,6 +106,8 @@ const state = {
   revolvingSaleId: 0,
   addFundModalOpen: false,
   disbursementModalOpen: false,
+  revolvingHistoryFrom: '',
+  revolvingHistoryTo: '',
 };
 
 const serviceIncludeOptions = ['Wash', 'Dry', 'Fold', 'Detergent', 'Fabcon', 'Zonrox'] as const;
@@ -126,6 +129,21 @@ function escapeHtml(value: string | number | null | undefined) {
 
 function cleanAddonName(name: string) {
   return name.replace(/^(add[- ]?on|additional)\s+/i, '').trim();
+}
+
+/** Cash on Hand = Total Cash − Total Disbursement (same as Report Summary). */
+function computeCashOnHand(totalCash: number, totalDisbursement: number) {
+  return Number((totalCash - totalDisbursement).toFixed(2));
+}
+
+function computeCashOnHandForDate(date: string, orders: OrderRow[], expenses: DisbursementExpense[], manualCashAmount = 0) {
+  const orderCash = orders
+    .filter((order) => localDateFromIso(order.createdAt) === date)
+    .reduce((sum, order) => sum + order.paidAmount, 0);
+  const dayDisbursements = expenses
+    .filter((expense) => expense.expenseDate === date)
+    .reduce((sum, expense) => sum + expense.amount, 0);
+  return computeCashOnHand(orderCash + manualCashAmount, dayDisbursements);
 }
 
 function foldCountRowsFromOrders(orders: OrderRow[]) {
@@ -160,6 +178,30 @@ function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-PH', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
 }
 
+function formatDateTimeStack(value: string) {
+  const date = new Date(value);
+  const datePart = new Intl.DateTimeFormat('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }).format(date);
+  const timePart = new Intl.DateTimeFormat('en-PH', { hour: 'numeric', minute: '2-digit', hour12: true }).format(date);
+  return `<div class="datetime-stack"><strong>${escapeHtml(datePart)}</strong><span class="meta">${escapeHtml(timePart)}</span></div>`;
+}
+
+function isGensanStaff(user: Staff | null) {
+  return user?.role === 'staff' && user.branch === 'Gensan Branch';
+}
+
+function renderHtmlTable(headers: string[], bodyRows: string[][], tableClass = 'data-table') {
+  return `
+    <div class="table-scroll">
+      <table class="${tableClass}">
+        <thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join('')}</tr></thead>
+        <tbody>${bodyRows.length
+    ? bodyRows.map((cells) => `<tr>${cells.map((cell) => `<td>${cell}</td>`).join('')}</tr>`).join('')
+    : `<tr><td colspan="${headers.length}" class="table-empty">No records found.</td></tr>`}</tbody>
+      </table>
+    </div>
+  `;
+}
+
 function dashboardDateTime(date = new Date()) {
   return {
     date: new Intl.DateTimeFormat('en-PH', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }).format(date),
@@ -172,7 +214,7 @@ function currentReportSelection(): ReportPreviewState {
   const dateToInput = document.querySelector<HTMLInputElement>('[data-date-to]');
   const types = Array.from(document.querySelectorAll<HTMLInputElement>('input[name="reportType"]:checked'))
     .map((input) => input.value)
-    .filter((value): value is ReportType => value === 'sales' || value === 'disbursement' || value === 'fold_count' || value === 'summary');
+    .filter((value): value is ReportType => value === 'sales' || value === 'disbursement' || value === 'fold_count' || value === 'revolving_fund' || value === 'summary');
 
   return {
     from: dateFromInput?.value || '0000-01-01',
@@ -185,7 +227,7 @@ function reportSelectionInRange(date: string, selection: { from: string; to: str
   return date >= selection.from && date <= selection.to;
 }
 
-function buildReportData(orders: OrderRow[], sales: DailySale[], expenses: DisbursementExpense[], foldRate: number, selection: { from: string; to: string; types: ReportType[] }) {
+function buildReportData(orders: OrderRow[], sales: DailySale[], expenses: DisbursementExpense[], revolvingHistory: RevolvingHistory[], foldRate: number, selection: { from: string; to: string; types: ReportType[] }) {
   const selectedTypes = new Set(selection.types);
   const salesOrders = orders.filter((order) => reportSelectionInRange(localDateFromIso(order.createdAt), selection));
   const manualSales = sales.filter((sale) => reportSelectionInRange(sale.saleDate, selection));
@@ -231,12 +273,12 @@ function buildReportData(orders: OrderRow[], sales: DailySale[], expenses: Disbu
     totalExpenses,
     totalDisbursement,
     rows: [
-      ['Type', 'Date', 'Number', 'Name', 'Cash', 'GCash', 'Total', 'Balance'],
-      ...filteredExpenses.map((expense) => ['Expense', expense.expenseDate, expense.number, expense.name, '', '', expense.amount, '']),
+      ['Type', 'Date', 'Number', 'Name', 'Amount'],
+      ...filteredExpenses.map((expense) => ['Expense', expense.expenseDate, expense.number, expense.name, expense.amount]),
       [],
-      ['Disbursement Summary', selection.from, 'to', selection.to, '', '', '', ''],
-      ['Expenses', '', '', '', '', '', totalExpenses, ''],
-      ['Total Disbursement', '', '', '', '', '', totalDisbursement, ''],
+      ['Disbursement Summary', selection.from, 'to', selection.to, ''],
+      ['Expenses', '', '', '', totalExpenses],
+      ['Total Disbursement', '', '', '', totalDisbursement],
     ],
   });
 
@@ -246,6 +288,38 @@ function buildReportData(orders: OrderRow[], sales: DailySale[], expenses: Disbu
       ...filteredFoldCounts.map((row) => [row.staffName, row.folds]),
       [],
       ['Total Folds', filteredFoldCounts.reduce((sum, row) => sum + row.folds, 0)],
+    ],
+  });
+
+  const filteredRevolvingHistory = revolvingHistory.filter((row) => reportSelectionInRange(localDateFromIso(row.createdAt), selection));
+
+  const revolvingDailySummaryRows = () => ({
+    rows: [
+      ['Date of Sales', 'Cash on Hand', 'Status', 'Date Update'],
+      ...manualSales.map((sale) => {
+        const cashOnHand = computeCashOnHandForDate(sale.saleDate, orders, expenses, sale.cashAmount);
+        const status = sale.status === 'revolving'
+          ? 'Revolving'
+          : sale.status === 'endorsed'
+            ? `Endorsed to ${sale.endorsedTo ?? ''}`
+            : 'Pending';
+        return [sale.saleDate, cashOnHand, status, sale.statusUpdatedAt ? localDateFromIso(sale.statusUpdatedAt) : ''];
+      }),
+    ],
+  });
+
+  const revolvingHistoryRows = () => ({
+    rows: [
+      ['Date', 'Number', 'Name', 'Amount', 'Category', 'Description', 'Type'],
+      ...filteredRevolvingHistory.map((row) => [
+        localDateFromIso(row.createdAt),
+        row.revolvingNumber,
+        row.name,
+        row.type === 'disbursement' ? -row.amount : row.amount,
+        row.category,
+        row.description ?? '',
+        row.type === 'add' ? 'Add Revolving Fund' : 'Disbursement',
+      ]),
     ],
   });
 
@@ -263,7 +337,7 @@ function buildReportData(orders: OrderRow[], sales: DailySale[], expenses: Disbu
       ['Total Sales', '', '', '', '', '', salesData.totalSales, ''],
       ['Total Disbursement', '', '', '', '', '', disbursementData.totalDisbursement, ''],
       ['Profit', '', '', '', '', '', profit, ''],
-      ['Cash on Hand', '', '', '', '', '', salesData.totalCash - disbursementData.totalDisbursement, ''],
+      ['Cash on Hand', '', '', '', '', '', computeCashOnHand(salesData.totalCash, disbursementData.totalDisbursement), ''],
     ];
   };
 
@@ -273,6 +347,8 @@ function buildReportData(orders: OrderRow[], sales: DailySale[], expenses: Disbu
     salesRows,
     disbursementRows,
     foldCountRows,
+    revolvingDailySummaryRows,
+    revolvingHistoryRows,
     summaryRows,
     profit,
   };
@@ -300,6 +376,7 @@ function initials(user: Staff | null) {
 function navIcon(tab: TabKey) {
   const icons: Record<TabKey, string> = {
     dashboard: 'DB',
+    pos: 'POS',
     orders: 'PO',
     archived: 'AR',
     customers: 'CU',
@@ -416,16 +493,17 @@ async function render() {
         </header>
 
         ${state.tab === 'dashboard' ? renderDashboard({ paidToday, orders: data.orders }) : ''}
-        ${state.tab === 'orders' ? renderOrders(data.orders, data.customers, data.services, data.categories, data.staff, data.payments, data.branch) : ''}
+        ${state.tab === 'pos' ? renderPos(data.orders, data.customers, data.services, data.categories, data.payments, data.branch) : ''}
+        ${state.tab === 'orders' ? renderOrders(data.orders, data.staff, data.services, data.payments) : ''}
         ${state.tab === 'archived' ? renderArchivedOrders(data.orders, data.staff, data.services, data.payments) : ''}
         ${state.tab === 'customers' ? renderCustomers(data.customers, data.orders) : ''}
         ${state.tab === 'pricing' ? renderPricing(data.allServices, data.categories) : ''}
         ${state.tab === 'disbursements' ? renderDisbursements(data.expenses, data.sales) : ''}
-        ${state.tab === 'reports' ? renderReports(data.orders, data.sales, data.expenses, data.foldRate, salesTotal, disbursementTotal, profit) : ''}
+        ${state.tab === 'reports' ? renderReports(data.orders, data.sales, data.expenses, data.revolvingHistory, data.foldRate, salesTotal, disbursementTotal, profit) : ''}
         ${state.tab === 'inventory' ? renderInventory(data.services, data.categories) : ''}
         ${state.tab === 'maintenance' ? renderMaintenance(data.machines, data.subcleanings, data.branch) : ''}
         ${state.tab === 'staff' ? renderStaff(data.allStaff, data.branch) : ''}
-        ${state.tab === 'revolving' ? renderRevolving(data.sales, data.revolvingHistory) : ''}
+        ${state.tab === 'revolving' ? renderRevolving(data.sales, data.revolvingHistory, data.orders, data.expenses) : ''}
         ${state.tab === 'settings' ? renderSettings(data.branch, data.foldRate, data.reportEmail) : ''}
       </main>
     </div>
@@ -435,7 +513,7 @@ async function render() {
   bindOrderForms(data);
   bindPricingForms(data.allServices);
   bindDisbursementForms();
-  bindReportActions(data.orders, data.sales, data.expenses, data.foldRate);
+  bindReportActions(data.orders, data.sales, data.expenses, data.revolvingHistory, data.foldRate);
   bindOrderFilters();
   bindCustomerSearch();
   bindMaintenanceForms();
@@ -447,7 +525,8 @@ async function render() {
 
 function visibleTabs(): TabKey[] {
   if (state.currentUser?.role === 'admin') return (Object.keys(tabLabels) as TabKey[]).filter((t) => t !== 'inventory');
-  return ['orders', 'archived', 'disbursements', 'reports', 'maintenance', 'revolving'];
+  if (isGensanStaff(state.currentUser)) return ['disbursements', 'reports', 'maintenance', 'revolving'];
+  return ['pos', 'orders', 'archived', 'disbursements', 'reports', 'maintenance', 'revolving'];
 }
 
 function renderLogin() {
@@ -524,18 +603,10 @@ function renderDashboard(metrics: { paidToday: number; orders: OrderRow[] }) {
   `;
 }
 
-function renderOrders(orders: OrderRow[], customers: Customer[], services: LaundryService[], categories: ItemCategory[], staff: Staff[], payments: Payment[], branch: string) {
+function renderPos(orders: OrderRow[], customers: Customer[], services: LaundryService[], categories: ItemCategory[], payments: Payment[], branch: string) {
   const orderServices = services.filter((service) => service.serviceType === 'order' && service.isActive);
   const addons = services.filter((service) => service.serviceType === 'addon' && service.isActive);
   const receipt = state.receiptOrderId ? orders.find((order) => order.id === state.receiptOrderId) : null;
-  const activeOrders = orders.filter((order) => order.status !== 'claimed');
-  const query = state.orderSearch.trim().toLowerCase();
-  const dateFilter = state.orderDateFilter.trim();
-  const filteredOrders = activeOrders.filter((order) => {
-    const matchesQuery = !query || [order.ticket, order.customer, order.phone, order.service, order.itemCategory, order.status].some((value) => String(value ?? '').toLowerCase().includes(query));
-    const matchesDate = !dateFilter || localDateFromIso(order.createdAt) === dateFilter;
-    return matchesQuery && matchesDate;
-  });
 
   // Only show customers who have a prior order in this branch
   const branchCustomerIds = new Set(orders.map((o) => o.customerId));
@@ -543,8 +614,8 @@ function renderOrders(orders: OrderRow[], customers: Customer[], services: Laund
 
   return `
     <section class="grid content full">
-      <article class="panel">
-        ${sectionTitle('New POS order', 'Customer, service, weight, add-ons, and initial payment')}
+      <article class="panel span-2">
+        ${sectionTitle('New POS order', 'Tap a service, add extra quantities, and confirm the total')}
         <form id="order-form" class="form">
           <div class="form-row">
             <label>Existing customer (${escapeHtml(branch)})
@@ -559,22 +630,24 @@ function renderOrders(orders: OrderRow[], customers: Customer[], services: Laund
             <label>Phone<input name="customerPhone" placeholder="09..." /></label>
           </div>
 
-          <label>Service
-            <select name="serviceId" required>
-              ${orderServices.map((service) => `<option value="${service.id}">${escapeHtml(service.name)} - ${money(service.price)}</option>`).join('')}
-            </select>
-          </label>
-          <label>Item category
-            <select name="itemCategoryId" required>
-              ${categories.map((category) => `<option value="${category.id}">${escapeHtml(category.name)} max ${category.maxKg}kg</option>`).join('')}
-            </select>
-            <span class="field-hint" data-category-weight></span>
-          </label>
-          <label>Weight (KG)<input name="weightKg" type="number" min="0.25" max="200" step="0.01" value="1" required /></label>
+          <fieldset class="service-picker">
+            <legend>Services</legend>
+            ${orderServices.map((service, index) => `<label class="service-option">
+              <input type="radio" name="serviceId" value="${service.id}" ${index === 0 ? 'checked' : ''} />
+              <span>
+                <strong>${escapeHtml(service.name)}</strong>
+                <small>${escapeHtml(service.description ?? service.category)} ${service.maxKg ? ` / max ${service.maxKg}kg` : ''}</small>
+              </span>
+              <b>${money(service.price)}</b>
+            </label>`).join('')}
+          </fieldset>
 
           <fieldset class="check-grid">
             <legend>Extra services</legend>
-            ${addons.length ? addons.map((addon) => `<label class="check"><input type="checkbox" name="addonIds" value="${addon.id}" /> ${escapeHtml(cleanAddonName(addon.name))} ${money(addon.price)}</label>`).join('') : '<p class="helper">No extra services configured.</p>'}
+            ${addons.length ? addons.map((addon) => `<label class="addon-quantity">
+              <span><strong>${escapeHtml(cleanAddonName(addon.name))}</strong><small>${money(addon.price)} each</small></span>
+              <input type="number" name="addonQty-${addon.id}" min="0" step="1" value="0" inputmode="numeric" />
+            </label>`).join('') : '<p class="helper">No extra services configured.</p>'}
           </fieldset>
 
           <div id="price-preview" class="price-preview"></div>
@@ -594,7 +667,25 @@ function renderOrders(orders: OrderRow[], customers: Customer[], services: Laund
         </form>
       </article>
 
-      <article class="panel">
+      ${receipt ? renderReceipt(receipt, payments.filter((payment) => payment.orderId === receipt.id)) : ''}
+    </section>
+  `;
+}
+
+function renderOrders(orders: OrderRow[], staff: Staff[], services: LaundryService[], payments: Payment[]) {
+  const receipt = state.receiptOrderId ? orders.find((order) => order.id === state.receiptOrderId) : null;
+  const activeOrders = orders.filter((order) => order.status !== 'claimed');
+  const query = state.orderSearch.trim().toLowerCase();
+  const dateFilter = state.orderDateFilter.trim();
+  const filteredOrders = activeOrders.filter((order) => {
+    const matchesQuery = !query || [order.ticket, order.customer, order.phone, order.service, order.itemCategory, order.status].some((value) => String(value ?? '').toLowerCase().includes(query));
+    const matchesDate = !dateFilter || localDateFromIso(order.createdAt) === dateFilter;
+    return matchesQuery && matchesDate;
+  });
+
+  return `
+    <section class="grid content full">
+      <article class="panel span-2">
         ${sectionTitle('Order queue', 'Workflow, payment, and receipts')}
         <form class="queue-filters" id="order-queue-filters">
           <label>
@@ -614,9 +705,13 @@ function renderOrders(orders: OrderRow[], customers: Customer[], services: Laund
           <div><span>Active queue</span><strong>${filteredOrders.length}</strong></div>
           <div><span>Claimed archived</span><strong>${orders.filter((order) => order.status === 'claimed').length}</strong></div>
         </div>
-        <div class="table orders-table">
-          <div class="table-head"><div>Ticket</div><div>Customer</div><div>Total</div><div>Status</div><div>Actions</div></div>
-          ${filteredOrders.map((order) => renderOrderRow(order, staff, services)).join('') || '<div class="helper">No matching active orders.</div>'}
+        <div class="table-scroll">
+          <table class="data-table orders-data-table">
+            <thead><tr><th>Ticket</th><th>Customer</th><th>Service</th><th>Total</th><th>Payment</th><th>Status</th><th>Actions</th></tr></thead>
+            <tbody>
+              ${filteredOrders.map((order) => renderOrderRow(order, staff, services)).join('') || '<tr><td colspan="7" class="table-empty">No matching active orders.</td></tr>'}
+            </tbody>
+          </table>
         </div>
       </article>
       ${receipt ? renderReceipt(receipt, payments.filter((payment) => payment.orderId === receipt.id)) : ''}
@@ -651,9 +746,13 @@ function renderArchivedOrders(orders: OrderRow[], staff: Staff[], services: Laun
           <div><span>Archived claims</span><strong>${filteredArchivedOrders.length}</strong></div>
           <div><span>Total claimed</span><strong>${archivedOrders.length}</strong></div>
         </div>
-        <div class="table orders-table archived-orders-table">
-          <div class="table-head"><div>Ticket</div><div>Customer</div><div>Total</div><div>Status</div><div>Actions</div></div>
-          ${filteredArchivedOrders.map((order) => renderOrderRow(order, staff, services)).join('') || '<div class="helper">No archived orders found.</div>'}
+        <div class="table-scroll">
+          <table class="data-table orders-data-table archived-orders-table">
+            <thead><tr><th>Ticket</th><th>Customer</th><th>Service</th><th>Total</th><th>Payment</th><th>Status</th><th>Actions</th></tr></thead>
+            <tbody>
+              ${filteredArchivedOrders.map((order) => renderOrderRow(order, staff, services)).join('') || '<tr><td colspan="7" class="table-empty">No archived orders found.</td></tr>'}
+            </tbody>
+          </table>
         </div>
       </article>
       ${receipt ? renderReceipt(receipt, payments.filter((payment) => payment.orderId === receipt.id)) : ''}
@@ -666,20 +765,28 @@ function renderOrderRow(order: OrderRow, staff: Staff[], services: LaundryServic
   const nextStep = steps.find((step) => !order.workflowCompleted.includes(step.key));
   const needsFoldStaff = nextStep?.key === 'fold';
   const needsExtraConfirmation = nextStep?.key === 'extras' && order.extras.length > 0;
+  const paymentStatus = order.paidAmount <= 0 ? 'Unpaid' : order.balance > 0 ? 'Partial' : 'Paid';
+  const paymentClass = paymentStatus === 'Paid' ? 'ok' : paymentStatus === 'Partial' ? 'warn' : 'meta';
+  const extrasLabel = order.extras.length
+    ? order.extras.map((extra) => `${escapeHtml(cleanAddonName(extra.name))} x${Number(extra.quantity ?? 1)}`).join(', ')
+    : '';
   return `
-    <div class="table-row">
-      <div><strong>${escapeHtml(order.ticket)}</strong><div class="small">${escapeHtml(order.service)} / ${escapeHtml(order.itemCategory)}</div></div>
-      <div>${escapeHtml(order.customer)}<div class="small">${escapeHtml(order.phone ?? '')}</div></div>
-      <div class="amount-cell"><strong>${money(order.totalAmount)}</strong><div class="small">Paid ${money(order.paidAmount)} / Bal ${money(order.balance)}</div></div>
-      <div>
+    <tr>
+      <td><strong>${escapeHtml(order.ticket)}</strong><div class="small">${escapeHtml(formatDate(order.createdAt))}</div></td>
+      <td>${escapeHtml(order.customer)}<div class="small">${escapeHtml(order.phone ?? '')}</div></td>
+      <td>${escapeHtml(order.service)}${extrasLabel ? `<div class="small">Extras: ${extrasLabel}</div>` : ''}</td>
+      <td class="amount-cell"><strong>${money(order.totalAmount)}</strong><div class="small">Bal ${money(order.balance)}</div></td>
+      <td><span class="payment-status ${paymentClass}">${paymentStatus}</span><div class="small">Paid ${money(order.paidAmount)}</div></td>
+      <td>
         <div class="${order.status === 'ready' || order.status === 'claimed' ? 'ok' : 'warn'}">${escapeHtml(order.status)}</div>
         <div class="workflow-progress">
           ${steps.map((step) => `<span class="${order.workflowCompleted.includes(step.key) ? 'is-done' : nextStep?.key === step.key ? 'is-next' : ''}">${escapeHtml(step.label)}</span>`).join('')}
         </div>
-      </div>
+      </td>
+      <td>
       <div class="row-actions">
         ${nextStep ? `<form class="inline-form advance-form" data-order-id="${order.id}">
-          ${needsExtraConfirmation ? `<div class="extra-confirmation">Confirm extra service: <strong>${order.extras.map((extra) => escapeHtml(cleanAddonName(extra.name))).join(', ')}</strong></div>` : ''}
+          ${needsExtraConfirmation ? `<div class="extra-confirmation">Confirm extra service: <strong>${order.extras.map((extra) => `${escapeHtml(cleanAddonName(extra.name))} x${Number(extra.quantity ?? 1)}`).join(', ')}</strong></div>` : ''}
           ${needsFoldStaff ? `<select name="assignedStaffId" required>
             <option value="">Staff</option>
             ${staff.map((person) => `<option value="${person.id}">${escapeHtml(person.name)}</option>`).join('')}
@@ -696,13 +803,15 @@ function renderOrderRow(order: OrderRow, staff: Staff[], services: LaundryServic
         ` : ''}
         <button class="secondary" data-receipt="${order.id}">Receipt</button>
       </div>
-    </div>
+      </td>
+    </tr>
   `;
 }
 
 function renderReceipt(order: OrderRow, payments: Payment[]) {
   const tendered = payments.reduce((sum, payment) => sum + Number(payment.amount), 0);
   const change = Math.max(0, Number((tendered - order.totalAmount).toFixed(2)));
+  const paymentStatus = order.paidAmount <= 0 ? 'Unpaid' : order.balance > 0 ? 'Partial' : 'Paid';
   return `
     <div class="modal-backdrop" role="presentation">
       <div class="receipt-modal" role="dialog" aria-modal="true" aria-labelledby="receipt-title">
@@ -721,12 +830,11 @@ function renderReceipt(order: OrderRow, payments: Payment[]) {
           </div>
           <div class="summary-list receipt-lines">
             <div><span>Service</span><strong>${escapeHtml(order.service)}</strong></div>
-            <div><span>Category</span><strong>${escapeHtml(order.itemCategory)}</strong></div>
-            <div><span>Weight</span><strong>${order.weightKg} kg</strong></div>
-            ${order.extras.length ? `<div><span>Extra services</span><strong>${order.extras.map((extra) => escapeHtml(cleanAddonName(extra.name))).join(', ')}</strong></div>` : ''}
+            ${order.extras.length ? `<div><span>Extra services</span><strong>${order.extras.map((extra) => `${escapeHtml(cleanAddonName(extra.name))} x${Number(extra.quantity ?? 1)} (${money(Number(extra.total ?? extra.price))})`).join(', ')}</strong></div>` : ''}
             <div><span>Total</span><strong>${money(order.totalAmount)}</strong></div>
             <div><span>Tendered</span><strong>${money(tendered)}</strong></div>
             <div><span>Paid</span><strong>${money(order.paidAmount)}</strong></div>
+            <div><span>Payment status</span><strong>${paymentStatus}</strong></div>
             <div><span>Change</span><strong>${money(change)}</strong></div>
             <div><span>Balance</span><strong>${money(order.balance)}</strong></div>
           </div>
@@ -738,6 +846,35 @@ function renderReceipt(order: OrderRow, payments: Payment[]) {
       </div>
     </div>
   `;
+}
+
+async function printCurrentReceipt() {
+  const receipt = document.querySelector<HTMLElement>('#receipt-print-area');
+  const title = document.querySelector<HTMLElement>('#receipt-title')?.textContent?.trim() || 'Laba101 receipt';
+  if (!receipt) return;
+
+  if (!Capacitor.isNativePlatform()) {
+    window.print();
+    return;
+  }
+
+  const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title><style>
+body{margin:0;background:#fff;color:#061a42;font-family:Arial,sans-serif}.receipt{width:2.2in;margin:0 auto;padding:10px;font-size:11px;line-height:1.25}.receipt-head,.receipt-customer,.summary-list div,.receipt-payments div{display:flex;justify-content:space-between;gap:10px}.receipt-head,.receipt-customer{border-bottom:1px dashed #b9c5dc;padding-bottom:10px;margin-bottom:10px}.summary-list{display:grid;gap:7px}.summary-list div,.receipt-payments div{border-bottom:1px solid #edf1fb;padding:5px 0}.receipt h3{font-size:14px;margin:10px 0 6px}.helper{color:#5c6a86}
+</style></head><body>${receipt.outerHTML}</body></html>`;
+  const fileName = `laba101-receipt-${Date.now()}.html`;
+  await Filesystem.writeFile({
+    path: fileName,
+    data: html,
+    directory: Directory.External,
+    encoding: Encoding.UTF8,
+  });
+  const { uri } = await Filesystem.getUri({ path: fileName, directory: Directory.External });
+  await Share.share({
+    title,
+    text: 'Open this receipt file and choose Print from your Android print service.',
+    files: [uri],
+    dialogTitle: 'Print receipt',
+  });
 }
 
 function renderCustomers(customers: Customer[], orders: OrderRow[]) {
@@ -939,8 +1076,8 @@ function renderDisbursements(expenses: DisbursementExpense[], sales: DailySale[]
   `;
 }
 
-function renderReports(orders: OrderRow[], sales: DailySale[], expenses: DisbursementExpense[], foldRate: number, salesTotal: number, disbursementTotal: number, profit: number) {
-  const preview = state.reportPreview ? buildReportData(orders, sales, expenses, foldRate, state.reportPreview) : null;
+function renderReports(orders: OrderRow[], sales: DailySale[], expenses: DisbursementExpense[], revolvingHistory: RevolvingHistory[], foldRate: number, salesTotal: number, disbursementTotal: number, profit: number) {
+  const preview = state.reportPreview ? buildReportData(orders, sales, expenses, revolvingHistory, foldRate, state.reportPreview) : null;
   return `
     <section class="page-head">
       <div>
@@ -969,6 +1106,7 @@ function renderReports(orders: OrderRow[], sales: DailySale[], expenses: Disburs
             <label><input type="checkbox" name="reportType" value="sales" checked /> Sales reports</label>
             <label><input type="checkbox" name="reportType" value="disbursement" checked /> Disbursement reports</label>
             <label><input type="checkbox" name="reportType" value="fold_count" /> Fold Count</label>
+            <label><input type="checkbox" name="reportType" value="revolving_fund" /> Revolving Fund</label>
             <label><input type="checkbox" name="reportType" value="summary" checked /> Summary</label>
           </div>
         </div>
@@ -995,8 +1133,8 @@ function renderReports(orders: OrderRow[], sales: DailySale[], expenses: Disburs
         ${preview.selectedTypes.has('disbursement') ? `
           <article>
             ${sectionTitle('Disbursement preview', `${preview.selection.from} to ${preview.selection.to}`)}
-            <div class="table wide-table report-preview-table">
-              <div class="table-head report-table-head"><div>Type</div><div>Date</div><div>Number</div><div>Name</div><div>Cash</div><div>GCash</div><div>Total</div><div>Balance</div></div>
+            <div class="table wide-table report-preview-table report-disbursement-table">
+              <div class="table-head report-table-head"><div>Type</div><div>Date</div><div>Number</div><div>Name</div><div>Amount</div></div>
               ${preview.disbursementRows().rows.slice(1).map((row) => `<div class="table-row report-table-row">${row.map((value) => `<div>${escapeHtml(value ?? '')}</div>`).join('')}</div>`).join('')}
             </div>
           </article>` : ''}
@@ -1007,6 +1145,36 @@ function renderReports(orders: OrderRow[], sales: DailySale[], expenses: Disburs
               <div class="table-head"><div>Staff</div><div>Fold Count</div></div>
               ${preview.foldCountRows().rows.slice(1).map((row) => `<div class="table-row">${row.map((value) => `<div>${escapeHtml(value ?? '')}</div>`).join('')}</div>`).join('')}
             </div>
+          </article>` : ''}
+        ${preview.selectedTypes.has('revolving_fund') ? `
+          <article>
+            ${sectionTitle('Revolving Fund — Daily Summary', `${preview.selection.from} to ${preview.selection.to}`)}
+            ${renderHtmlTable(
+              ['Date of Sales', 'Cash on Hand', 'Status', 'Date Update'],
+              preview.revolvingDailySummaryRows().rows.slice(1).map((row) => [
+                escapeHtml(String(row[0] ?? '')),
+                escapeHtml(String(row[1] ?? '')),
+                escapeHtml(String(row[2] ?? '')),
+                escapeHtml(String(row[3] ?? '')),
+              ]),
+              'data-table revolving-report-table',
+            )}
+          </article>
+          <article>
+            ${sectionTitle('Revolving Fund — Table History', `${preview.selection.from} to ${preview.selection.to}`)}
+            ${renderHtmlTable(
+              ['Date', 'Number', 'Name', 'Amount', 'Category', 'Description', 'Type'],
+              preview.revolvingHistoryRows().rows.slice(1).map((row) => [
+                escapeHtml(String(row[0] ?? '')),
+                escapeHtml(String(row[1] ?? '')),
+                escapeHtml(String(row[2] ?? '')),
+                escapeHtml(String(row[3] ?? '')),
+                escapeHtml(String(row[4] ?? '')),
+                escapeHtml(String(row[5] ?? '')),
+                escapeHtml(String(row[6] ?? '')),
+              ]),
+              'data-table revolving-report-table',
+            )}
           </article>` : ''}
         ${preview.selectedTypes.has('summary') ? `
           <article>
@@ -1244,7 +1412,9 @@ function bindNavigation() {
     void render();
   });
   document.querySelector<HTMLButtonElement>('[data-print-receipt]')?.addEventListener('click', () => {
-    window.print();
+    void printCurrentReceipt().catch((error) => {
+      alert(error instanceof Error ? error.message : 'Receipt could not be printed.');
+    });
   });
   document.querySelectorAll<HTMLElement>('[data-report-tab]').forEach((button) => {
     button.addEventListener('click', () => {
@@ -1312,6 +1482,34 @@ function bindDashboardClock() {
   dashboardClockTimer = window.setInterval(update, 1000);
 }
 
+function defaultCategoryForService(service: LaundryService | undefined, categories: ItemCategory[]) {
+  if (!service) return null;
+  return categories.find((category) => category.name.toLowerCase() === service.category.toLowerCase())
+    ?? categories.find((category) => category.name === 'Regular Clothes')
+    ?? categories[0]
+    ?? null;
+}
+
+function defaultWeightForService(service: LaundryService, category: ItemCategory) {
+  return Math.max(1, Number(service.maxKg || category.maxKg || 1));
+}
+
+function addonQuantitiesFromForm(form: HTMLFormElement, services: LaundryService[]) {
+  return Object.fromEntries(
+    services
+      .filter((service) => service.serviceType === 'addon')
+      .map((service) => [service.id, Number((form.querySelector<HTMLInputElement>(`input[name="addonQty-${service.id}"]`)?.value ?? 0))])
+      .filter(([, quantity]) => Number(quantity) > 0),
+  ) as Record<number, number>;
+}
+
+function addonInputsFromForm(form: HTMLFormElement, services: LaundryService[]) {
+  const quantities = addonQuantitiesFromForm(form, services);
+  return services
+    .filter((service) => service.serviceType === 'addon' && Number(quantities[service.id] ?? 0) > 0)
+    .map((service) => ({ ...service, quantity: Number(quantities[service.id]) }));
+}
+
 function bindOrderForms(data: Awaited<ReturnType<typeof loadData>>) {
   const form = document.querySelector<HTMLFormElement>('#order-form');
   const preview = document.querySelector<HTMLDivElement>('#price-preview');
@@ -1319,7 +1517,6 @@ function bindOrderForms(data: Awaited<ReturnType<typeof loadData>>) {
   const customerSelect = form?.querySelector<HTMLSelectElement>('select[name="customerId"]');
   const customerName = form?.querySelector<HTMLInputElement>('input[name="customerName"]');
   const customerPhone = form?.querySelector<HTMLInputElement>('input[name="customerPhone"]');
-  const categoryWeight = form?.querySelector<HTMLElement>('[data-category-weight]');
   const orderError = form?.querySelector<HTMLElement>('[data-order-error]');
   const paymentMethod = form?.querySelector<HTMLSelectElement>('select[name="paymentMethod"]');
   const paymentReferenceWrap = form?.querySelector<HTMLElement>('.gcash-reference');
@@ -1342,12 +1539,11 @@ function bindOrderForms(data: Awaited<ReturnType<typeof loadData>>) {
     if (!form || !preview) return;
     const formData = new FormData(form);
     const service = data.services.find((item) => item.id === Number(formData.get('serviceId')));
-    const category = data.categories.find((item) => item.id === Number(formData.get('itemCategoryId')));
-    const addons = data.services.filter((item) => formData.getAll('addonIds').map(Number).includes(item.id));
+    const category = defaultCategoryForService(service, data.categories);
+    const addons = addonInputsFromForm(form, data.services);
     if (!service || !category) return;
-    const price = calculatePricing(service, category, Number(formData.get('weightKg') ?? 0), addons);
-    if (categoryWeight) categoryWeight.textContent = `Allowed item weight: ${category.maxKg} kg`;
-    const selectedExtras = addons.map((addon) => cleanAddonName(addon.name));
+    const price = calculatePricing(service, category, defaultWeightForService(service, category), addons);
+    const selectedExtras = price.extras.map((addon) => `${cleanAddonName(addon.name)} x${addon.quantity}`);
     const overweight = price.extraKg > 0;
     if (saveButton) saveButton.disabled = overweight;
     if (orderError) {
@@ -1372,10 +1568,10 @@ function bindOrderForms(data: Awaited<ReturnType<typeof loadData>>) {
     event.preventDefault();
     const fd = new FormData(form);
     const service = data.services.find((item) => item.id === Number(fd.get('serviceId')));
-    const category = data.categories.find((item) => item.id === Number(fd.get('itemCategoryId')));
-    const addons = data.services.filter((item) => fd.getAll('addonIds').map(Number).includes(item.id));
+    const category = defaultCategoryForService(service, data.categories);
+    const addons = addonInputsFromForm(form, data.services);
     if (service && category) {
-      const price = calculatePricing(service, category, Number(fd.get('weightKg') ?? 0), addons);
+      const price = calculatePricing(service, category, defaultWeightForService(service, category), addons);
       if (price.extraKg > 0) {
         if (orderError) {
           orderError.hidden = false;
@@ -1390,10 +1586,10 @@ function bindOrderForms(data: Awaited<ReturnType<typeof loadData>>) {
         customerName: String(fd.get('customerName') ?? ''),
         customerPhone: String(fd.get('customerPhone') ?? '') || null,
         serviceId: Number(fd.get('serviceId')),
-        itemCategoryId: Number(fd.get('itemCategoryId')),
         branch: data.branch,
-        weightKg: Number(fd.get('weightKg')),
-        addonIds: fd.getAll('addonIds').map(Number),
+        itemCategoryId: category?.id,
+        weightKg: service && category ? defaultWeightForService(service, category) : undefined,
+        addonQuantities: addonQuantitiesFromForm(form, data.services),
         paidAmount: Number(fd.get('paidAmount') ?? 0),
         paymentMethod: String(fd.get('paymentMethod') ?? 'cash') as 'cash' | 'gcash',
         paymentReference: String(fd.get('paymentReference') ?? '') || null,
@@ -1530,7 +1726,7 @@ function bindDisbursementForms() {
   });
 }
 
-function bindReportActions(orders: OrderRow[], sales: DailySale[], expenses: DisbursementExpense[], foldRate: number) {
+function bindReportActions(orders: OrderRow[], sales: DailySale[], expenses: DisbursementExpense[], revolvingHistory: RevolvingHistory[], foldRate: number) {
   document.querySelector<HTMLButtonElement>('#generate-report')?.addEventListener('click', () => {
     state.reportPreview = currentReportSelection();
     void render();
@@ -1571,11 +1767,19 @@ function bindReportActions(orders: OrderRow[], sales: DailySale[], expenses: Dis
       }
 
       if (sheetName === 'Disbursement') {
-        return [130, 115, 165, 190, 95, 105, 105, 105];
+        return [110, 115, 150, 220, 105];
       }
 
       if (sheetName === 'Fold Count') {
         return [220, 125];
+      }
+
+      if (sheetName === 'Revolving Daily Summary') {
+        return [115, 105, 120, 115];
+      }
+
+      if (sheetName === 'Revolving History') {
+        return [115, 96, 140, 96, 110, 180, 120];
       }
 
       return [155, 125, 125, 125, 95, 95, 115, 115];
@@ -1586,7 +1790,7 @@ function bindReportActions(orders: OrderRow[], sales: DailySale[], expenses: Dis
         .join('');
       const rowXml = sheet.rows.map((row) => {
         if (!row.length) return '<Row ss:Height="10" ss:StyleID="BorderRow"><Cell ss:StyleID="BorderCell"><Data ss:Type="String">&nbsp;</Data></Cell></Row>';
-        const isHeaderRow = row[0] === 'Type' || row[0] === 'Summary' || row[0] === 'Sales Summary' || row[0] === 'Disbursement Summary' || row[0] === 'Staff';
+        const isHeaderRow = row[0] === 'Type' || row[0] === 'Summary' || row[0] === 'Sales Summary' || row[0] === 'Disbursement Summary' || row[0] === 'Staff' || row[0] === 'Date of Sales' || row[0] === 'Date';
         const rowStyle = isHeaderRow ? 'HeaderRow' : 'BorderRow';
         const cellStyle = isHeaderRow ? 'HeaderCell' : 'BorderCell';
         const rowHeight = isHeaderRow ? 26 : 22;
@@ -1654,11 +1858,15 @@ function bindReportActions(orders: OrderRow[], sales: DailySale[], expenses: Dis
   };
   const reportFile = () => {
     const selection = currentReportSelection();
-    const report = buildReportData(orders, sales, expenses, foldRate, selection);
+    const report = buildReportData(orders, sales, expenses, revolvingHistory, foldRate, selection);
     const sheets: Array<{ name: string; rows: Array<Array<string | number>> }> = [];
     if (report.selectedTypes.has('sales')) sheets.push({ name: 'Sales Report', rows: report.salesRows().rows });
     if (report.selectedTypes.has('disbursement')) sheets.push({ name: 'Disbursement', rows: report.disbursementRows().rows });
     if (report.selectedTypes.has('fold_count')) sheets.push({ name: 'Fold Count', rows: report.foldCountRows().rows });
+    if (report.selectedTypes.has('revolving_fund')) {
+      sheets.push({ name: 'Revolving Daily Summary', rows: report.revolvingDailySummaryRows().rows });
+      sheets.push({ name: 'Revolving History', rows: report.revolvingHistoryRows().rows });
+    }
     if (report.selectedTypes.has('summary')) sheets.push({ name: 'Summary', rows: report.summaryRows() });
     const html = workbookFromSheets(sheets.length ? sheets : [{ name: 'Summary', rows: report.summaryRows() }]);
     const fileName = `laba101-report-${selection.from}-to-${selection.to}.xls`;
@@ -1953,7 +2161,7 @@ if (savedSession) {
   }
 }
 
-function renderRevolving(sales: DailySale[], revolvingHistory: RevolvingHistory[]) {
+function renderRevolving(sales: DailySale[], revolvingHistory: RevolvingHistory[], orders: OrderRow[], expenses: DisbursementExpense[]) {
   const baseRevolvingTotal = sales
     .filter(s => s.status === 'revolving')
     .reduce((sum, s) => sum + s.cashAmount, 0);
@@ -1968,6 +2176,45 @@ function renderRevolving(sales: DailySale[], revolvingHistory: RevolvingHistory[
 
   const revolvingTotal = baseRevolvingTotal + historyAdditions - historyDisbursements;
 
+  const historyFrom = state.revolvingHistoryFrom || '0000-01-01';
+  const historyTo = state.revolvingHistoryTo || '9999-12-31';
+  const filteredRevolvingHistory = revolvingHistory.filter((row) => {
+    const date = localDateFromIso(row.createdAt);
+    return date >= historyFrom && date <= historyTo;
+  });
+
+  const dailySummaryTableRows = sales.map((sale) => {
+    const cashOnHand = computeCashOnHandForDate(sale.saleDate, orders, expenses, sale.cashAmount);
+    const status = sale.status === 'revolving'
+      ? '<span class="ok">Revolving</span>'
+      : sale.status === 'endorsed'
+        ? `<span class="warn">Endorsed to ${escapeHtml(sale.endorsedTo)}</span>`
+        : '<span class="meta">Pending</span>';
+    const actionMarkup = sale.status !== 'revolving' && sale.status !== 'endorsed'
+      ? `<div class="row-actions">
+          <button class="primary revolving-btn" data-id="${sale.id}">Revolving</button>
+          <button class="secondary endorsed-btn" data-id="${sale.id}" data-date="${formatDate(sale.saleDate)}">Endorsed</button>
+        </div>`
+      : '';
+    return [
+      `<strong>${escapeHtml(formatDate(sale.saleDate))}</strong>`,
+      `<strong class="ok">${money(cashOnHand)}</strong>`,
+      status,
+      sale.statusUpdatedAt ? escapeHtml(formatDate(sale.statusUpdatedAt)) : '-',
+      actionMarkup,
+    ];
+  });
+
+  const historyTableRows = filteredRevolvingHistory.map((row) => [
+    formatDateTimeStack(row.createdAt),
+    `<strong>${escapeHtml(row.revolvingNumber)}</strong>`,
+    escapeHtml(row.name),
+    `<strong class="${row.type === 'disbursement' ? 'warn' : 'ok'}">${row.type === 'disbursement' ? '-' : '+'}${money(row.amount)}</strong>`,
+    escapeHtml(row.category),
+    escapeHtml(row.description || '-'),
+    `<span class="${row.type === 'add' ? 'ok' : 'warn'}">${row.type === 'add' ? 'Add Revolving Fund' : 'Disbursement'}</span>`,
+  ]);
+
   return `
     <section class="grid content full">
       <div class="panel-header" style="display: flex; gap: 16px; margin-bottom: 24px; align-items: center;">
@@ -1980,54 +2227,31 @@ function renderRevolving(sales: DailySale[], revolvingHistory: RevolvingHistory[
           <p style="font-size: 12px; font-weight: bold; opacity: 0.8; text-transform: uppercase; margin: 0 0 8px 0;">Revolving Fund Total</p>
           <p style="font-size: 32px; font-weight: 800; margin: 0;">${money(revolvingTotal)}</p>
         </div>
-        ${sectionTitle('Daily Summary', 'Daily sales history with status tracking')}
-        
-        <div class="table wide-table">
-          <div class="table-head"><div>Date of Sales</div><div>Cash-on Hand</div><div>Status</div><div>Date Update</div><div>Action</div></div>
-          ${sales.length === 0 ? '<div class="helper">No daily sales found.</div>' : ''}
-          ${sales.map(sale => {
-            let statusMarkup = '<span class="meta">Pending</span>';
-            if (sale.status === 'revolving') statusMarkup = '<span class="ok">Revolving</span>';
-            else if (sale.status === 'endorsed') statusMarkup = `<span class="warn">Endorsed to ${escapeHtml(sale.endorsedTo)}</span>`;
-
-            let actionMarkup = '';
-            if (sale.status !== 'revolving' && sale.status !== 'endorsed') {
-              actionMarkup = `
-                <button class="primary revolving-btn" data-id="${sale.id}">Revolving</button>
-                <button class="secondary endorsed-btn" data-id="${sale.id}" data-date="${formatDate(sale.saleDate)}">Endorsed</button>
-              `;
-            }
-
-            return `
-              <div class="table-row">
-                <div><strong>${formatDate(sale.saleDate)}</strong></div>
-                <div><strong style="color: #15803d;">${money(sale.cashAmount)}</strong></div>
-                <div>${statusMarkup}</div>
-                <div>${sale.statusUpdatedAt ? formatDate(sale.statusUpdatedAt) : '-'}</div>
-                <div class="row-actions">${actionMarkup}</div>
-              </div>
-            `;
-          }).join('')}
-        </div>
+        ${sectionTitle('Daily Summary', 'Cash on hand per day (order cash + manual cash − disbursements)')}
+        ${renderHtmlTable(
+          ['Date of Sales', 'Cash on Hand', 'Status', 'Date Update', 'Action'],
+          dailySummaryTableRows,
+          'data-table revolving-summary-datatable',
+        )}
       </article>
 
       <article class="panel">
-        ${sectionTitle('Revolving Table History', 'History of disbursements and additions')}
-        <div class="table wide-table">
-          <div class="table-head"><div>Revolving#</div><div>Name</div><div>Amount</div><div>Category</div><div>Description</div><div>Type</div><div>Date</div></div>
-          ${revolvingHistory.length === 0 ? '<div class="helper">No revolving history found.</div>' : ''}
-          ${revolvingHistory.map(r => `
-            <div class="table-row">
-              <div><strong>${escapeHtml(r.revolvingNumber)}</strong></div>
-              <div>${escapeHtml(r.name)}</div>
-              <div><strong class="${r.type === 'disbursement' ? 'warn' : 'ok'}">${r.type === 'disbursement' ? '-' : '+'}${money(r.amount)}</strong></div>
-              <div>${escapeHtml(r.category)}</div>
-              <div>${escapeHtml(r.description || '-')}</div>
-              <div><span class="${r.type === 'add' ? 'ok' : 'warn'}">${r.type === 'add' ? 'Add Revolving Fund' : 'Disbursement'}</span></div>
-              <div>${formatDate(r.createdAt)}</div>
-            </div>
-          `).join('')}
-        </div>
+        ${sectionTitle('Revolving Table History', 'Filter by date — DISB numbers shared with Daily Report expenses')}
+        <form id="revolving-history-filters" class="form revolving-history-filters">
+          <div class="form-row">
+            <label>From<input name="revolvingHistoryFrom" type="date" value="${state.revolvingHistoryFrom}" /></label>
+            <label>To<input name="revolvingHistoryTo" type="date" value="${state.revolvingHistoryTo}" /></label>
+          </div>
+          <div class="row-actions">
+            <button class="primary" type="submit">Apply filter</button>
+            <button class="secondary" type="button" id="revolving-history-clear">Clear</button>
+          </div>
+        </form>
+        ${renderHtmlTable(
+          ['Date', 'Disbursement #', 'Name', 'Amount', 'Category', 'Description', 'Type'],
+          historyTableRows,
+          'data-table revolving-history-datatable',
+        )}
       </article>
 
       ${state.endorseModalOpen ? `
@@ -2099,6 +2323,20 @@ function renderRevolving(sales: DailySale[], revolvingHistory: RevolvingHistory[
 }
 
 function bindRevolvingForms() {
+  document.querySelector<HTMLFormElement>('#revolving-history-filters')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const fd = new FormData(event.currentTarget);
+    state.revolvingHistoryFrom = String(fd.get('revolvingHistoryFrom') ?? '').trim();
+    state.revolvingHistoryTo = String(fd.get('revolvingHistoryTo') ?? '').trim();
+    await render();
+  });
+
+  document.querySelector<HTMLButtonElement>('#revolving-history-clear')?.addEventListener('click', async () => {
+    state.revolvingHistoryFrom = '';
+    state.revolvingHistoryTo = '';
+    await render();
+  });
+
   document.querySelectorAll<HTMLButtonElement>('.revolving-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       state.revolvingModalOpen = true;
@@ -2216,6 +2454,7 @@ function bindRevolvingForms() {
         category: String(fd.get('category') ?? '').trim(),
         description: String(fd.get('description') ?? '').trim(),
         type: 'disbursement',
+        expenseDate: today(),
         createdAt: new Date().toISOString(),
       });
       state.disbursementModalOpen = false;

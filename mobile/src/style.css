@@ -1260,6 +1260,64 @@ legend {
   min-height: auto;
 }
 
+.service-picker {
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
+.service-option,
+.addon-quantity {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #fff;
+  padding: 12px;
+}
+
+.service-option {
+  cursor: pointer;
+}
+
+.service-option:has(input:checked) {
+  border-color: var(--navy);
+  background: #eef4ff;
+  box-shadow: inset 0 0 0 1px var(--navy);
+}
+
+.service-option input {
+  width: 20px;
+  min-height: 20px;
+  flex: 0 0 auto;
+}
+
+.service-option span,
+.addon-quantity span {
+  display: grid;
+  flex: 1;
+  gap: 3px;
+  min-width: 0;
+}
+
+.service-option small,
+.addon-quantity small {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.service-option b {
+  color: var(--navy);
+  white-space: nowrap;
+}
+
+.addon-quantity input {
+  width: 82px;
+  min-height: 42px;
+  flex: 0 0 auto;
+  text-align: center;
+}
+
 .quick-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1357,6 +1415,129 @@ legend {
   border-color: var(--soft-line);
   border-radius: 16px;
   padding: 14px;
+}
+
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.revolving-data-table .table {
+  min-width: 100%;
+}
+
+.revolving-summary-table .table-head,
+.revolving-summary-table .table-row {
+  grid-template-columns: minmax(112px, 1.1fr) minmax(108px, 1fr) minmax(96px, 0.9fr) minmax(108px, 1fr) minmax(148px, 1.3fr);
+  min-width: 620px;
+}
+
+.revolving-history-table .table-head,
+.revolving-history-table .table-row {
+  grid-template-columns: 108px 96px minmax(100px, 1fr) 96px minmax(96px, 0.9fr) minmax(140px, 1.3fr) minmax(120px, 1fr);
+  min-width: 760px;
+}
+
+.datetime-stack {
+  display: grid;
+  gap: 2px;
+  line-height: 1.25;
+}
+
+.datetime-stack strong {
+  color: var(--navy);
+  font-size: 0.88rem;
+}
+
+.datetime-stack .meta {
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.report-disbursement-table .table-head,
+.report-disbursement-table .table-row {
+  min-width: 520px;
+  grid-template-columns: 82px 96px 100px minmax(140px, 1.4fr) 96px;
+}
+
+.revolving-table-empty {
+  padding: 16px 14px;
+}
+
+.revolving-history-filters {
+  margin-bottom: 16px;
+}
+
+.data-table {
+  width: 100%;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0 10px;
+}
+
+.data-table thead th {
+  background: var(--navy);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-align: left;
+  padding: 12px 14px;
+  white-space: nowrap;
+}
+
+.data-table thead th:first-child {
+  border-radius: 14px 0 0 14px;
+}
+
+.data-table thead th:last-child {
+  border-radius: 0 14px 14px 0;
+}
+
+.data-table tbody td {
+  background: rgba(255, 255, 255, 0.96);
+  border-top: 1px solid var(--soft-line);
+  border-bottom: 1px solid var(--soft-line);
+  padding: 12px 14px;
+  vertical-align: middle;
+  font-weight: 700;
+  color: var(--navy);
+}
+
+.data-table tbody td:first-child {
+  border-left: 1px solid var(--soft-line);
+  border-radius: 14px 0 0 14px;
+}
+
+.data-table tbody td:last-child {
+  border-right: 1px solid var(--soft-line);
+  border-radius: 0 14px 14px 0;
+}
+
+.data-table .table-empty {
+  text-align: center;
+  color: var(--muted);
+}
+
+.revolving-summary-datatable {
+  min-width: 640px;
+}
+
+.revolving-history-datatable {
+  min-width: 820px;
+}
+
+.orders-data-table {
+  min-width: 1120px;
+}
+
+.payment-status {
+  font-weight: 900;
+}
+
+.revolving-report-table {
+  min-width: 720px;
 }
 
 .inline-form,
@@ -1795,6 +1976,30 @@ legend {
   .table-row {
     grid-template-columns: 1fr;
     gap: 12px;
+  }
+
+  .revolving-data-table .table-head,
+  .revolving-data-table .revolving-summary-head,
+  .revolving-data-table .revolving-history-head {
+    display: grid;
+  }
+
+  .revolving-data-table .table-row {
+    display: grid;
+  }
+
+  .revolving-summary-table .table-row {
+    grid-template-columns: minmax(112px, 1.1fr) minmax(108px, 1fr) minmax(96px, 0.9fr) minmax(108px, 1fr) minmax(148px, 1.3fr);
+  }
+
+  .revolving-history-table .table-row {
+    grid-template-columns: 108px 96px minmax(100px, 1fr) 96px minmax(96px, 0.9fr) minmax(140px, 1.3fr) minmax(120px, 1fr);
+  }
+
+  .report-disbursement-table .table-head,
+  .report-disbursement-table .table-row {
+    min-width: 520px;
+    grid-template-columns: 82px 96px 100px minmax(140px, 1.4fr) 96px;
   }
 
   .dashboard-main {
