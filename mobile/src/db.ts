@@ -109,6 +109,18 @@ export type DailySale = {
   notes: string | null;
   status?: string | null;
   endorsedTo?: string | null;
+  statusUpdatedAt?: string | null;
+};
+
+export type RevolvingHistory = {
+  id: number;
+  revolvingNumber: string;
+  name: string;
+  amount: number;
+  category: string;
+  description: string | null;
+  type: 'disbursement' | 'add';
+  createdAt: string;
 };
 
 export type Machine = {
@@ -233,6 +245,8 @@ const seedPayments: Payment[] = [];
 const seedExpenses: DisbursementExpense[] = [];
 
 const seedSales: DailySale[] = [];
+
+const seedRevolvingHistory: RevolvingHistory[] = [];
 
 const seedMachines: Machine[] = [
   ...[1, 2, 3, 4].map((id) => ({ id, machineName: `Washer ${id}`, machineType: 'washer' as const, status: 'available' as const, branch: 'Main Store' })),
@@ -380,6 +394,7 @@ async function resetNativeToFreshStart(db: SQLiteDBConnection) {
     DELETE FROM fold_logs;
     DELETE FROM disbursement_expenses;
     DELETE FROM daily_sales;
+    DELETE FROM revolving_history;
     DELETE FROM staff WHERE id <> 1;
   `);
   await ensureNativeSeedAdmin(db);
@@ -402,6 +417,7 @@ async function ensureSchema() {
       writeBrowser('fold_logs', []);
       writeBrowser('expenses', seedExpenses);
       writeBrowser('sales', seedSales);
+      writeBrowser('revolving_history', seedRevolvingHistory);
       writeBrowser('machines', seedMachines);
       writeBrowser('subcleanings', []);
       writeBrowser('settings', seedSettings);
@@ -468,6 +484,7 @@ async function ensureSchema() {
     CREATE TABLE IF NOT EXISTS fold_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, orderTicket TEXT NOT NULL, staffName TEXT NOT NULL, foldCount INTEGER NOT NULL, rate REAL NOT NULL, total REAL NOT NULL, createdAt TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS disbursement_expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, expenseDate TEXT NOT NULL, number TEXT NOT NULL, name TEXT NOT NULL, category TEXT NOT NULL, description TEXT, amount REAL NOT NULL);
     CREATE TABLE IF NOT EXISTS daily_sales (id INTEGER PRIMARY KEY AUTOINCREMENT, saleDate TEXT NOT NULL, saleNumber TEXT, cashAmount REAL NOT NULL, gcashAmount REAL NOT NULL, totalAmount REAL NOT NULL, notes TEXT);
+    CREATE TABLE IF NOT EXISTS revolving_history (id INTEGER PRIMARY KEY AUTOINCREMENT, revolvingNumber TEXT NOT NULL, name TEXT NOT NULL, amount REAL NOT NULL, category TEXT NOT NULL, description TEXT, type TEXT NOT NULL, createdAt TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS machines (id INTEGER PRIMARY KEY AUTOINCREMENT, machineName TEXT NOT NULL, machineType TEXT NOT NULL, status TEXT NOT NULL, branch TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS subcleanings (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL, machineIds TEXT NOT NULL, machineNames TEXT NOT NULL, cleaningStatus TEXT NOT NULL, notes TEXT, branch TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
@@ -498,6 +515,7 @@ async function ensureSchema() {
   await addColumnIfMissing(db, 'daily_sales', 'saleNumber', 'TEXT');
   await addColumnIfMissing(db, 'daily_sales', 'status', 'TEXT');
   await addColumnIfMissing(db, 'daily_sales', 'endorsedTo', 'TEXT');
+  await addColumnIfMissing(db, 'daily_sales', 'statusUpdatedAt', 'TEXT');
 
   const staffCount = await db.query('SELECT COUNT(*) as count FROM staff');
   if (((staffCount.values?.[0] as { count: number } | undefined)?.count ?? 0) === 0) {
@@ -509,6 +527,7 @@ async function ensureSchema() {
     for (const payment of seedPayments) await db.run('INSERT INTO payments (id, orderId, amount, method, reference, receivedAt, branch) VALUES (?, ?, ?, ?, ?, ?, ?)', [payment.id, payment.orderId, payment.amount, payment.method, payment.reference, payment.receivedAt, payment.branch]);
     for (const expense of seedExpenses) await db.run('INSERT INTO disbursement_expenses (id, expenseDate, number, name, category, description, amount) VALUES (?, ?, ?, ?, ?, ?, ?)', [expense.id, expense.expenseDate, expense.number, expense.name, expense.category, expense.description, expense.amount]);
     for (const sale of seedSales) await db.run('INSERT INTO daily_sales (id, saleDate, saleNumber, cashAmount, gcashAmount, totalAmount, notes) VALUES (?, ?, ?, ?, ?, ?, ?)', [sale.id, sale.saleDate, sale.saleNumber, sale.cashAmount, sale.gcashAmount, sale.totalAmount, sale.notes]);
+    for (const rh of seedRevolvingHistory) await db.run('INSERT INTO revolving_history (id, revolvingNumber, name, amount, category, description, type, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [rh.id, rh.revolvingNumber, rh.name, rh.amount, rh.category, rh.description, rh.type, rh.createdAt]);
     for (const machine of seedMachines) await db.run('INSERT INTO machines (id, machineName, machineType, status, branch) VALUES (?, ?, ?, ?, ?)', [machine.id, machine.machineName, machine.machineType, machine.status, machine.branch]);
     for (const setting of seedSettings) await db.run('INSERT INTO settings (key, value) VALUES (?, ?)', [setting.key, setting.value]);
   }
@@ -968,7 +987,7 @@ export async function createExpense(input: { expenseDate: string; name: string; 
 export async function listDailySales(): Promise<DailySale[]> {
   if (!Capacitor.isNativePlatform()) return readBrowser<DailySale[]>('sales', seedSales);
   const db = await ensureNativeDb();
-  const result = await db.query('SELECT id, saleDate, COALESCE(saleNumber, "") as saleNumber, cashAmount, gcashAmount, totalAmount, notes, status, endorsedTo FROM daily_sales ORDER BY saleDate DESC, id DESC');
+  const result = await db.query('SELECT id, saleDate, COALESCE(saleNumber, "") as saleNumber, cashAmount, gcashAmount, totalAmount, notes, status, endorsedTo, statusUpdatedAt FROM daily_sales ORDER BY saleDate DESC, id DESC');
   return (result.values ?? []) as DailySale[];
 }
 
@@ -996,19 +1015,41 @@ export async function saveDailySale(input: { saleDate: string; cashAmount: numbe
   }
 }
 
-export async function updateDailySaleStatus(id: number, status: string, endorsedTo: string | null = null) {
+export async function updateDailySaleStatus(id: number, status: string, endorsedTo: string | null = null, statusUpdatedAt: string) {
   if (!Capacitor.isNativePlatform()) {
     const items = readBrowser<DailySale[]>('sales', seedSales);
     const existing = items.find((item) => item.id === id);
     if (existing) {
       existing.status = status;
       existing.endorsedTo = endorsedTo;
+      existing.statusUpdatedAt = statusUpdatedAt;
       writeBrowser('sales', items);
     }
     return;
   }
   const db = await ensureNativeDb();
-  await db.run('UPDATE daily_sales SET status = ?, endorsedTo = ? WHERE id = ?', [status, endorsedTo, id]);
+  await db.run('UPDATE daily_sales SET status = ?, endorsedTo = ?, statusUpdatedAt = ? WHERE id = ?', [status, endorsedTo, statusUpdatedAt, id]);
+}
+
+export async function listRevolvingHistory(): Promise<RevolvingHistory[]> {
+  if (!Capacitor.isNativePlatform()) return readBrowser<RevolvingHistory[]>('revolving_history', seedRevolvingHistory).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const db = await ensureNativeDb();
+  const result = await db.query('SELECT id, revolvingNumber, name, amount, category, description, type, createdAt FROM revolving_history ORDER BY createdAt DESC, id DESC');
+  return (result.values ?? []) as RevolvingHistory[];
+}
+
+export async function saveRevolvingHistory(input: { name: string; amount: number; category: string; description: string | null; type: 'disbursement' | 'add'; createdAt: string }) {
+  if (!Capacitor.isNativePlatform()) {
+    const items = readBrowser<RevolvingHistory[]>('revolving_history', seedRevolvingHistory);
+    const id = nextNumericId(items);
+    items.unshift({ id, revolvingNumber: `REV-${String(id).padStart(2, '0')}`, ...input });
+    writeBrowser('revolving_history', items);
+    return;
+  }
+  const db = await ensureNativeDb();
+  const countResult = await db.query('SELECT COALESCE(MAX(id), 0) + 1 as id FROM revolving_history');
+  const nextId = Number((countResult.values?.[0] as { id: number }).id);
+  await db.run('INSERT INTO revolving_history (revolvingNumber, name, amount, category, description, type, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)', [`REV-${String(nextId).padStart(2, '0')}`, input.name, input.amount, input.category, input.description || null, input.type, input.createdAt]);
 }
 
 export async function listMachines(branch: string): Promise<Machine[]> {

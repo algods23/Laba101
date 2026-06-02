@@ -24,6 +24,7 @@ import {
   listMachines,
   listOrders,
   listPayments,
+  listRevolvingHistory,
   listServices,
   listStaff,
   listSubcleanings,
@@ -33,6 +34,7 @@ import {
   saveMachine,
   saveService,
   saveSubcleaning,
+  saveRevolvingHistory,
   setSetting,
   workflowSteps,
   getSetting,
@@ -48,6 +50,7 @@ import {
   type Machine,
   type OrderRow,
   type Payment,
+  type RevolvingHistory,
   type Staff,
   type Subcleaning,
 } from './db';
@@ -98,6 +101,10 @@ const state = {
   endorseModalOpen: false,
   endorseSaleId: 0,
   endorseSaleDate: '',
+  revolvingModalOpen: false,
+  revolvingSaleId: 0,
+  addFundModalOpen: false,
+  disbursementModalOpen: false,
 };
 
 const serviceIncludeOptions = ['Wash', 'Dry', 'Fold', 'Detergent', 'Fabcon', 'Zonrox'] as const;
@@ -256,6 +263,7 @@ function buildReportData(orders: OrderRow[], sales: DailySale[], expenses: Disbu
       ['Total Sales', '', '', '', '', '', salesData.totalSales, ''],
       ['Total Disbursement', '', '', '', '', '', disbursementData.totalDisbursement, ''],
       ['Profit', '', '', '', '', '', profit, ''],
+      ['Cash on Hand', '', '', '', '', '', salesData.totalCash - disbursementData.totalDisbursement, ''],
     ];
   };
 
@@ -322,10 +330,11 @@ async function loadData() {
   const sales = await listDailySales();
   const machines = await listMachines(branch);
   const subcleanings = await listSubcleanings(branch);
+  const revolvingHistory = await listRevolvingHistory();
   const foldRate = await getFoldRate();
   const reportEmail = await getSetting('report_email');
 
-  return { branch, staff, allStaff, customers, services, allServices, categories, orders, payments, foldLogs, expenses, sales, machines, subcleanings, foldRate, reportEmail: reportEmail ?? '' };
+  return { branch, staff, allStaff, customers, services, allServices, categories, orders, payments, foldLogs, expenses, sales, machines, subcleanings, revolvingHistory, foldRate, reportEmail: reportEmail ?? '' };
 }
 
 async function render() {
@@ -416,7 +425,7 @@ async function render() {
         ${state.tab === 'inventory' ? renderInventory(data.services, data.categories) : ''}
         ${state.tab === 'maintenance' ? renderMaintenance(data.machines, data.subcleanings, data.branch) : ''}
         ${state.tab === 'staff' ? renderStaff(data.allStaff, data.branch) : ''}
-        ${state.tab === 'revolving' ? renderRevolving(data.sales) : ''}
+        ${state.tab === 'revolving' ? renderRevolving(data.sales, data.revolvingHistory) : ''}
         ${state.tab === 'settings' ? renderSettings(data.branch, data.foldRate, data.reportEmail) : ''}
       </main>
     </div>
@@ -1944,13 +1953,28 @@ if (savedSession) {
   }
 }
 
-function renderRevolving(sales: DailySale[]) {
-  const revolvingTotal = sales
+function renderRevolving(sales: DailySale[], revolvingHistory: RevolvingHistory[]) {
+  const baseRevolvingTotal = sales
     .filter(s => s.status === 'revolving')
     .reduce((sum, s) => sum + s.cashAmount, 0);
 
+  const historyAdditions = revolvingHistory
+    .filter(r => r.type === 'add')
+    .reduce((sum, r) => sum + r.amount, 0);
+
+  const historyDisbursements = revolvingHistory
+    .filter(r => r.type === 'disbursement')
+    .reduce((sum, r) => sum + r.amount, 0);
+
+  const revolvingTotal = baseRevolvingTotal + historyAdditions - historyDisbursements;
+
   return `
     <section class="grid content full">
+      <div class="panel-header" style="display: flex; gap: 16px; margin-bottom: 24px; align-items: center;">
+        <button class="primary" id="add-revolving-fund-btn">Add Revolving Fund</button>
+        <button class="secondary" id="revolving-disbursement-btn">Disbursement</button>
+      </div>
+
       <article class="panel">
         <div style="background-color: #061a42; color: white; padding: 24px; border-radius: 12px; margin-bottom: 24px;">
           <p style="font-size: 12px; font-weight: bold; opacity: 0.8; text-transform: uppercase; margin: 0 0 8px 0;">Revolving Fund Total</p>
@@ -1958,20 +1982,49 @@ function renderRevolving(sales: DailySale[]) {
         </div>
         ${sectionTitle('Daily Summary', 'Daily sales history with status tracking')}
         
-        <div class="table">
-          <div class="table-head"><div>Date of Sales</div><div>Cash-on Hand</div><div>Status</div><div>Action</div></div>
+        <div class="table wide-table">
+          <div class="table-head"><div>Date of Sales</div><div>Cash-on Hand</div><div>Status</div><div>Date Update</div><div>Action</div></div>
           ${sales.length === 0 ? '<div class="helper">No daily sales found.</div>' : ''}
-          ${sales.map(sale => `
+          ${sales.map(sale => {
+            let statusMarkup = '<span class="meta">Pending</span>';
+            if (sale.status === 'revolving') statusMarkup = '<span class="ok">Revolving</span>';
+            else if (sale.status === 'endorsed') statusMarkup = `<span class="warn">Endorsed to ${escapeHtml(sale.endorsedTo)}</span>`;
+
+            let actionMarkup = '';
+            if (sale.status !== 'revolving' && sale.status !== 'endorsed') {
+              actionMarkup = `
+                <button class="primary revolving-btn" data-id="${sale.id}">Revolving</button>
+                <button class="secondary endorsed-btn" data-id="${sale.id}" data-date="${formatDate(sale.saleDate)}">Endorsed</button>
+              `;
+            }
+
+            return `
+              <div class="table-row">
+                <div><strong>${formatDate(sale.saleDate)}</strong></div>
+                <div><strong style="color: #15803d;">${money(sale.cashAmount)}</strong></div>
+                <div>${statusMarkup}</div>
+                <div>${sale.statusUpdatedAt ? formatDate(sale.statusUpdatedAt) : '-'}</div>
+                <div class="row-actions">${actionMarkup}</div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </article>
+
+      <article class="panel">
+        ${sectionTitle('Revolving Table History', 'History of disbursements and additions')}
+        <div class="table wide-table">
+          <div class="table-head"><div>Revolving#</div><div>Name</div><div>Amount</div><div>Category</div><div>Description</div><div>Type</div><div>Date</div></div>
+          ${revolvingHistory.length === 0 ? '<div class="helper">No revolving history found.</div>' : ''}
+          ${revolvingHistory.map(r => `
             <div class="table-row">
-              <div><strong>${formatDate(sale.saleDate)}</strong></div>
-              <div><strong style="color: #15803d;">${money(sale.cashAmount)}</strong></div>
-              <div>
-                ${sale.status === 'revolving' ? '<span class="ok">Revolving</span>' : sale.status === 'endorsed' ? `<span class="warn">Endorsed to ${escapeHtml(sale.endorsedTo)}</span>` : '<span class="meta">Pending</span>'}
-              </div>
-              <div class="row-actions">
-                ${sale.status !== 'revolving' ? `<button class="primary revolving-btn" data-id="${sale.id}">Revolving</button>` : ''}
-                ${sale.status !== 'endorsed' ? `<button class="secondary endorsed-btn" data-id="${sale.id}" data-date="${formatDate(sale.saleDate)}">Endorsed</button>` : ''}
-              </div>
+              <div><strong>${escapeHtml(r.revolvingNumber)}</strong></div>
+              <div>${escapeHtml(r.name)}</div>
+              <div><strong class="${r.type === 'disbursement' ? 'warn' : 'ok'}">${r.type === 'disbursement' ? '-' : '+'}${money(r.amount)}</strong></div>
+              <div>${escapeHtml(r.category)}</div>
+              <div>${escapeHtml(r.description || '-')}</div>
+              <div><span class="${r.type === 'add' ? 'ok' : 'warn'}">${r.type === 'add' ? 'Add Revolving Fund' : 'Disbursement'}</span></div>
+              <div>${formatDate(r.createdAt)}</div>
             </div>
           `).join('')}
         </div>
@@ -1983,14 +2036,59 @@ function renderRevolving(sales: DailySale[]) {
             <form id="endorse-form" class="form" style="padding: 24px;">
               <h3 style="margin-top: 0;">Endorse Money</h3>
               <p class="meta" style="margin-bottom: 16px;">Endorsing cash from <strong>${escapeHtml(state.endorseSaleDate)}</strong>.</p>
-              
-              <label>Endorsed to (Name)
-                <input name="endorsedTo" type="text" placeholder="Enter name" required />
-              </label>
-              
+              <label>Endorsed to (Name)<input name="endorsedTo" type="text" placeholder="Enter name" required /></label>
               <div class="modal-actions" style="margin-top: 24px; padding: 0;">
                 <button class="primary" type="submit">Submit Endorsement</button>
                 <button class="secondary" type="button" id="close-endorse-modal">Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ` : ''}
+
+      ${state.revolvingModalOpen ? `
+        <div class="modal-backdrop" role="presentation">
+          <div class="receipt-modal" role="dialog" aria-modal="true" style="max-width: 400px; width: 90%;">
+            <div style="padding: 24px;">
+              <h3 style="margin-top: 0;">Confirm Revolving Fund</h3>
+              <p style="margin-bottom: 24px;">Are you sure you want to mark this daily sale as revolving?</p>
+              <div class="modal-actions" style="padding: 0;">
+                <button class="primary" id="confirm-revolving-btn">Confirm</button>
+                <button class="secondary" id="close-revolving-modal">Cancel</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ` : ''}
+
+      ${state.addFundModalOpen ? `
+        <div class="modal-backdrop" role="presentation">
+          <div class="receipt-modal" role="dialog" aria-modal="true" style="max-width: 400px; width: 90%;">
+            <form id="add-fund-form" class="form" style="padding: 24px;">
+              <h3 style="margin-top: 0;">Add Revolving Fund</h3>
+              <label>Name<input name="name" type="text" required /></label>
+              <label>Amount<input name="amount" type="number" step="0.01" min="0.01" required /></label>
+              <div class="modal-actions" style="margin-top: 24px; padding: 0;">
+                <button class="primary" type="submit">Add Fund</button>
+                <button class="secondary" type="button" id="close-add-fund-modal">Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ` : ''}
+
+      ${state.disbursementModalOpen ? `
+        <div class="modal-backdrop" role="presentation">
+          <div class="receipt-modal" role="dialog" aria-modal="true" style="max-width: 400px; width: 90%;">
+            <form id="disbursement-form" class="form" style="padding: 24px;">
+              <h3 style="margin-top: 0;">Disbursement</h3>
+              <label>Name<input name="name" type="text" required /></label>
+              <label>Amount<input name="amount" type="number" step="0.01" min="0.01" required /></label>
+              <label>Category<input name="category" type="text" required /></label>
+              <label>Description<input name="description" type="text" /></label>
+              <div class="modal-actions" style="margin-top: 24px; padding: 0;">
+                <button class="primary" type="submit">Disburse</button>
+                <button class="secondary" type="button" id="close-disbursement-modal">Cancel</button>
               </div>
             </form>
           </div>
@@ -2003,11 +2101,28 @@ function renderRevolving(sales: DailySale[]) {
 function bindRevolvingForms() {
   document.querySelectorAll<HTMLButtonElement>('.revolving-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
-      const id = Number(btn.dataset.id);
-      await updateDailySaleStatus(id, 'revolving');
+      state.revolvingModalOpen = true;
+      state.revolvingSaleId = Number(btn.dataset.id);
       await render();
     });
   });
+
+  const confirmRevolvingBtn = document.getElementById('confirm-revolving-btn');
+  if (confirmRevolvingBtn) {
+    confirmRevolvingBtn.addEventListener('click', async () => {
+      await updateDailySaleStatus(state.revolvingSaleId, 'revolving', null, new Date().toISOString());
+      state.revolvingModalOpen = false;
+      await render();
+    });
+  }
+
+  const closeRevolvingBtn = document.getElementById('close-revolving-modal');
+  if (closeRevolvingBtn) {
+    closeRevolvingBtn.addEventListener('click', async () => {
+      state.revolvingModalOpen = false;
+      await render();
+    });
+  }
 
   document.querySelectorAll<HTMLButtonElement>('.endorsed-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
@@ -2034,8 +2149,76 @@ function bindRevolvingForms() {
       const endorsedTo = String(fd.get('endorsedTo') ?? '').trim();
       if (!endorsedTo) return;
       
-      await updateDailySaleStatus(state.endorseSaleId, 'endorsed', endorsedTo);
+      await updateDailySaleStatus(state.endorseSaleId, 'endorsed', endorsedTo, new Date().toISOString());
       state.endorseModalOpen = false;
+      await render();
+    });
+  }
+
+  const addRevolvingBtn = document.getElementById('add-revolving-fund-btn');
+  if (addRevolvingBtn) {
+    addRevolvingBtn.addEventListener('click', async () => {
+      state.addFundModalOpen = true;
+      await render();
+    });
+  }
+
+  const closeAddFundBtn = document.getElementById('close-add-fund-modal');
+  if (closeAddFundBtn) {
+    closeAddFundBtn.addEventListener('click', async () => {
+      state.addFundModalOpen = false;
+      await render();
+    });
+  }
+
+  const addFundForm = document.getElementById('add-fund-form') as HTMLFormElement | null;
+  if (addFundForm) {
+    addFundForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(addFundForm);
+      await saveRevolvingHistory({
+        name: String(fd.get('name') ?? '').trim(),
+        amount: Number(fd.get('amount') ?? 0),
+        category: 'Add Revolving Fund',
+        description: null,
+        type: 'add',
+        createdAt: new Date().toISOString(),
+      });
+      state.addFundModalOpen = false;
+      await render();
+    });
+  }
+
+  const disbursementBtn = document.getElementById('revolving-disbursement-btn');
+  if (disbursementBtn) {
+    disbursementBtn.addEventListener('click', async () => {
+      state.disbursementModalOpen = true;
+      await render();
+    });
+  }
+
+  const closeDisbursementBtn = document.getElementById('close-disbursement-modal');
+  if (closeDisbursementBtn) {
+    closeDisbursementBtn.addEventListener('click', async () => {
+      state.disbursementModalOpen = false;
+      await render();
+    });
+  }
+
+  const disbursementForm = document.getElementById('disbursement-form') as HTMLFormElement | null;
+  if (disbursementForm) {
+    disbursementForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(disbursementForm);
+      await saveRevolvingHistory({
+        name: String(fd.get('name') ?? '').trim(),
+        amount: Number(fd.get('amount') ?? 0),
+        category: String(fd.get('category') ?? '').trim(),
+        description: String(fd.get('description') ?? '').trim(),
+        type: 'disbursement',
+        createdAt: new Date().toISOString(),
+      });
+      state.disbursementModalOpen = false;
       await render();
     });
   }
