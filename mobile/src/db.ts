@@ -51,6 +51,14 @@ export type Payment = {
   branch: string;
 };
 
+export type OrderLine = {
+  id: number;
+  name: string;
+  price: number;
+  quantity: number;
+  total: number;
+};
+
 export type OrderRow = {
   id: number;
   ticket: string;
@@ -59,6 +67,7 @@ export type OrderRow = {
   phone: string | null;
   serviceId: number;
   service: string;
+  serviceLines?: OrderLine[];
   itemCategoryId: number;
   itemCategory: string;
   branch: string;
@@ -153,7 +162,8 @@ type PricingResult = {
   totalAmount: number;
   allowedKg: number;
   extraKg: number;
-  warning: string | null;
+  warning: null;
+  serviceLines: OrderLine[];
   extras: Array<{ id: number; name: string; price: number; quantity: number; total: number }>;
 };
 
@@ -481,6 +491,7 @@ async function ensureSchema() {
       phone TEXT,
       serviceId INTEGER NOT NULL,
       service TEXT NOT NULL,
+      serviceLines TEXT,
       itemCategoryId INTEGER NOT NULL,
       itemCategory TEXT NOT NULL,
       branch TEXT NOT NULL,
@@ -525,6 +536,7 @@ async function ensureSchema() {
   await addColumnIfMissing(db, 'orders', 'customerId', 'INTEGER NOT NULL DEFAULT 0');
   await addColumnIfMissing(db, 'orders', 'phone', 'TEXT');
   await addColumnIfMissing(db, 'orders', 'serviceId', 'INTEGER NOT NULL DEFAULT 0');
+  await addColumnIfMissing(db, 'orders', 'serviceLines', 'TEXT');
   await addColumnIfMissing(db, 'orders', 'itemCategoryId', 'INTEGER NOT NULL DEFAULT 0');
   await addColumnIfMissing(db, 'orders', 'itemCategory', 'TEXT NOT NULL DEFAULT "Regular Clothes"');
   await addColumnIfMissing(db, 'orders', 'workflowCompleted', 'TEXT');
@@ -565,8 +577,8 @@ async function ensureSchema() {
 
 async function insertNativeOrder(db: SQLiteDBConnection, order: OrderRow) {
   await db.run(
-    'INSERT INTO orders (id, ticket, customerId, customer, phone, serviceId, service, itemCategoryId, itemCategory, branch, status, workflowCompleted, weightKg, price, additionalCharge, extraServiceAmount, totalAmount, paidAmount, extras, notes, foldedBy, dueAt, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [order.id, order.ticket, order.customerId, order.customer, order.phone, order.serviceId, order.service, order.itemCategoryId, order.itemCategory, order.branch, order.status, JSON.stringify(order.workflowCompleted), order.weightKg, order.price, order.additionalCharge, order.extraServiceAmount, order.totalAmount, order.paidAmount, JSON.stringify(order.extras), order.notes, order.foldedBy, order.dueAt, order.createdAt],
+    'INSERT INTO orders (id, ticket, customerId, customer, phone, serviceId, service, serviceLines, itemCategoryId, itemCategory, branch, status, workflowCompleted, weightKg, price, additionalCharge, extraServiceAmount, totalAmount, paidAmount, extras, notes, foldedBy, dueAt, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [order.id, order.ticket, order.customerId, order.customer, order.phone, order.serviceId, order.service, JSON.stringify(order.serviceLines ?? []), order.itemCategoryId, order.itemCategory, order.branch, order.status, JSON.stringify(order.workflowCompleted), order.weightKg, order.price, order.additionalCharge, order.extraServiceAmount, order.totalAmount, order.paidAmount, JSON.stringify(order.extras), order.notes, order.foldedBy, order.dueAt, order.createdAt],
   );
 }
 
@@ -574,21 +586,26 @@ function hydrateOrder(row: Record<string, unknown>): OrderRow {
   const paidAmount = Number(row.paidAmount ?? 0);
   const totalAmount = Number(row.totalAmount ?? 0);
   const foldedBy = Number(row.foldedBy);
+  const serviceLines = parseJson<OrderLine[]>(row.serviceLines as string | null, []);
+  const serviceId = Number(row.serviceId);
+  const service = String(row.service);
+  const price = Number(row.price);
   return {
     id: Number(row.id),
     ticket: String(row.ticket),
     customerId: Number(row.customerId),
     customer: String(row.customer),
     phone: row.phone ? String(row.phone) : null,
-    serviceId: Number(row.serviceId),
-    service: String(row.service),
+    serviceId,
+    service,
+    serviceLines: serviceLines.length ? serviceLines : [{ id: serviceId, name: service, price, quantity: 1, total: price }],
     itemCategoryId: Number(row.itemCategoryId),
     itemCategory: String(row.itemCategory),
     branch: String(row.branch),
     status: String(row.status),
     workflowCompleted: parseJson<string[]>(row.workflowCompleted as string | null, []),
     weightKg: Number(row.weightKg),
-    price: Number(row.price),
+    price,
     additionalCharge: Number(row.additionalCharge),
     extraServiceAmount: Number(row.extraServiceAmount),
     totalAmount,
@@ -812,10 +829,18 @@ export async function saveItemCategory(input: Omit<ItemCategory, 'id'> & { id?: 
 }
 
 type AddonInput = LaundryService & { quantity?: number };
+type ServiceInput = LaundryService & { quantity?: number };
 
-export function calculatePricing(service: LaundryService, category: ItemCategory, weightKg: number, addons: AddonInput[]): PricingResult {
+export function calculatePricing(service: ServiceInput | ServiceInput[], category: ItemCategory, weightKg: number, addons: AddonInput[]): PricingResult {
+  const selectedServices = (Array.isArray(service) ? service : [service])
+    .map((item) => {
+      const quantity = Math.max(0, Number(item.quantity ?? 1));
+      const price = Number(item.price);
+      return { id: item.id, name: item.name, price, quantity, total: Number((price * quantity).toFixed(2)) };
+    })
+    .filter((item) => item.quantity > 0);
   const allowedKg = Number(category.maxKg);
-  const extraKg = Math.max(0, weightKg - allowedKg);
+  const extraKg = 0;
   const additionalCharge = 0;
   const extras = addons
     .map((addon) => {
@@ -824,27 +849,30 @@ export function calculatePricing(service: LaundryService, category: ItemCategory
       return { id: addon.id, name: cleanAddonName(addon.name), price, quantity, total: Number((price * quantity).toFixed(2)) };
     })
     .filter((addon) => addon.quantity > 0);
+  const serviceAmount = selectedServices.reduce((sum, item) => sum + item.total, 0);
   const extraServiceAmount = extras.reduce((sum, addon) => sum + addon.total, 0);
-  const totalAmount = Number((Number(service.price) + additionalCharge + extraServiceAmount).toFixed(2));
+  const totalAmount = Number((serviceAmount + additionalCharge + extraServiceAmount).toFixed(2));
   return {
-    price: Number(service.price),
+    price: Number(serviceAmount.toFixed(2)),
     additionalCharge: Number(additionalCharge.toFixed(2)),
     extraServiceAmount: Number(extraServiceAmount.toFixed(2)),
     totalAmount,
     allowedKg,
     extraKg: Number(extraKg.toFixed(2)),
-    warning: extraKg > 0 ? `Weight exceeds the ${category.name} load limit of ${allowedKg.toFixed(2)} kg.` : null,
+    warning: null,
+    serviceLines: selectedServices,
     extras,
   };
 }
 
-export function workflowSteps(order: Pick<OrderRow, 'serviceId' | 'extras' | 'workflowCompleted'>, services: LaundryService[]) {
-  const service = services.find((item) => item.id === order.serviceId);
-  const includes = service?.includes ?? [];
+export function workflowSteps(order: Pick<OrderRow, 'serviceId' | 'serviceLines' | 'extras' | 'workflowCompleted'>, services: LaundryService[]) {
+  const selectedServiceIds = order.serviceLines?.length ? order.serviceLines.map((line) => line.id) : [order.serviceId];
+  const selectedServices = services.filter((item) => selectedServiceIds.includes(item.id));
+  const includes = Array.from(new Set(selectedServices.flatMap((item) => item.includes ?? [])));
   const steps = [{ key: 'received', label: 'Received' }];
   if (includes.includes('Wash')) steps.push({ key: 'wash', label: 'Wash' });
   if (order.extras.length) steps.push({ key: 'extras', label: 'Extra services' });
-  if (includes.includes('Dry') || (service?.dryingMinutes ?? 0) > 0) steps.push({ key: 'dry', label: 'Dry' });
+  if (includes.includes('Dry') || selectedServices.some((service) => (service.dryingMinutes ?? 0) > 0)) steps.push({ key: 'dry', label: 'Dry' });
   if (includes.includes('Fold')) steps.push({ key: 'fold', label: 'Fold' });
   steps.push({ key: 'ready', label: 'Ready' }, { key: 'claimed', label: 'Claimed' });
   return steps;
@@ -859,27 +887,38 @@ function statusFromCompleted(completed: string[]) {
 }
 
 export async function listOrders(branch: string): Promise<OrderRow[]> {
-  if (!Capacitor.isNativePlatform()) return readBrowser<OrderRow[]>('orders', seedOrders).filter((order) => order.branch === branch).map((order) => ({ ...order, balance: Number((order.totalAmount - order.paidAmount).toFixed(2)) }));
+  if (!Capacitor.isNativePlatform()) {
+    return readBrowser<OrderRow[]>('orders', seedOrders)
+      .filter((order) => order.branch === branch)
+      .map((order) => ({
+        ...order,
+        serviceLines: order.serviceLines ?? [{ id: order.serviceId, name: order.service, price: Number(order.price), quantity: 1, total: Number(order.price) }],
+        balance: Number((order.totalAmount - order.paidAmount).toFixed(2)),
+      }));
+  }
   const db = await ensureNativeDb();
   const result = await db.query('SELECT o.*, s.name as foldedByName FROM orders o LEFT JOIN staff s ON s.id = o.foldedBy WHERE o.branch = ? ORDER BY o.id DESC', [branch]);
   return (result.values ?? []).map((row) => hydrateOrder(row as Record<string, unknown>));
 }
 
-export async function createOrder(input: { customerId?: number; customerName: string; customerPhone?: string | null; serviceId: number; itemCategoryId?: number; branch: string; weightKg?: number; addonIds?: number[]; addonQuantities?: Record<number, number>; paidAmount: number; paymentMethod: 'cash' | 'gcash'; paymentReference?: string | null; notes?: string | null }) {
+export async function createOrder(input: { customerId?: number; customerName: string; customerPhone?: string | null; serviceId?: number; serviceQuantities?: Record<number, number>; itemCategoryId?: number; branch: string; weightKg?: number; addonIds?: number[]; addonQuantities?: Record<number, number>; paidAmount: number; paymentMethod: 'cash' | 'gcash'; paymentReference?: string | null; notes?: string | null }) {
   const [services, categories] = await Promise.all([listServices(), listItemCategories()]);
-  const service = services.find((item) => item.id === input.serviceId);
+  const serviceQuantities = input.serviceQuantities ?? (input.serviceId ? { [input.serviceId]: 1 } : {});
+  const selectedServices = services
+    .filter((item) => item.serviceType === 'order' && Number(serviceQuantities[item.id] ?? 0) > 0)
+    .map((item) => ({ ...item, quantity: Number(serviceQuantities[item.id] ?? 0) }));
+  const service = selectedServices[0];
   const category = categories.find((item) => item.id === input.itemCategoryId)
     ?? categories.find((item) => item.name.toLowerCase() === (service?.category ?? '').toLowerCase())
     ?? categories.find((item) => item.name === 'Regular Clothes')
     ?? categories[0];
-  if (!service || !category) throw new Error('Service or item category is missing.');
+  if (!selectedServices.length || !service || !category) throw new Error('Please select at least one service.');
   const addonQuantities = input.addonQuantities ?? Object.fromEntries((input.addonIds ?? []).map((id) => [id, 1]));
   const addons = services
     .filter((item) => item.serviceType === 'addon' && Number(addonQuantities[item.id] ?? 0) > 0)
     .map((item) => ({ ...item, quantity: Number(addonQuantities[item.id] ?? 0) }));
-  const weightKg = input.weightKg ?? Math.max(1, Number(service.maxKg || category.maxKg || 1));
-  const pricing = calculatePricing(service, category, weightKg, addons);
-  if (pricing.extraKg > 0) throw new Error(pricing.warning ?? 'Weight exceeds the allowed limit.');
+  const weightKg = input.weightKg ?? Math.max(1, Number(category.maxKg || service.maxKg || 1));
+  const pricing = calculatePricing(selectedServices, category, weightKg, addons);
   const customer = await upsertCustomer({ id: input.customerId || undefined, name: input.customerName, phone: input.customerPhone ?? null });
   const tenderedAmount = Math.max(0, input.paidAmount);
   const paidAmount = Math.min(pricing.totalAmount, tenderedAmount);
@@ -889,7 +928,8 @@ export async function createOrder(input: { customerId?: number; customerName: st
     customer: customer.name,
     phone: customer.phone,
     serviceId: service.id,
-    service: service.name,
+    service: pricing.serviceLines.map((line) => `${line.name} x${line.quantity}`).join(', '),
+    serviceLines: pricing.serviceLines,
     itemCategoryId: category.id,
     itemCategory: category.name,
     branch: input.branch,
@@ -903,10 +943,10 @@ export async function createOrder(input: { customerId?: number; customerName: st
     paidAmount,
     balance: Number((pricing.totalAmount - paidAmount).toFixed(2)),
     extras: pricing.extras,
-    notes: [input.notes, pricing.warning].filter(Boolean).join('\n') || null,
+    notes: input.notes || null,
     foldedBy: null,
     foldedByName: null,
-    dueAt: new Date(Date.now() + service.turnaroundHours * 60 * 60 * 1000).toISOString(),
+    dueAt: new Date(Date.now() + Math.max(...selectedServices.map((item) => item.turnaroundHours)) * 60 * 60 * 1000).toISOString(),
     createdAt: nowIso(),
   };
 

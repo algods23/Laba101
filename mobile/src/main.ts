@@ -97,6 +97,7 @@ const state = {
   customerSearch: '',
   orderSearch: '',
   orderDateFilter: '',
+  orderPaymentFilter: '',
   archivedOrderSearch: '',
   reportPreview: null as ReportPreviewState | null,
   endorseModalOpen: false,
@@ -172,6 +173,10 @@ function today() {
 
 function localDateFromIso(value: string) {
   return localDateInput(new Date(value));
+}
+
+function orderPaymentStatus(order: Pick<OrderRow, 'paidAmount' | 'balance'>) {
+  return order.paidAmount <= 0 ? 'unpaid' : order.balance > 0 ? 'partial' : 'paid';
 }
 
 function formatDate(value: string) {
@@ -632,22 +637,30 @@ function renderPos(orders: OrderRow[], customers: Customer[], services: LaundryS
 
           <fieldset class="service-picker">
             <legend>Services</legend>
-            ${orderServices.map((service, index) => `<label class="service-option">
-              <input type="radio" name="serviceId" value="${service.id}" ${index === 0 ? 'checked' : ''} />
+            ${orderServices.map((service) => `<div class="qty-card service-option service-quantity" data-qty-card="serviceQty-${service.id}">
               <span>
                 <strong>${escapeHtml(service.name)}</strong>
                 <small>${escapeHtml(service.description ?? service.category)} ${service.maxKg ? ` / max ${service.maxKg}kg` : ''}</small>
               </span>
               <b>${money(service.price)}</b>
-            </label>`).join('')}
+              <div class="qty-control">
+                <button type="button" data-qty-minus="serviceQty-${service.id}" aria-label="Decrease ${escapeHtml(service.name)}">-</button>
+                <input type="number" name="serviceQty-${service.id}" min="0" step="1" value="0" inputmode="numeric" />
+                <button type="button" data-qty-plus="serviceQty-${service.id}" aria-label="Increase ${escapeHtml(service.name)}">+</button>
+              </div>
+            </div>`).join('')}
           </fieldset>
 
           <fieldset class="check-grid">
             <legend>Extra services</legend>
-            ${addons.length ? addons.map((addon) => `<label class="addon-quantity">
+            ${addons.length ? addons.map((addon) => `<div class="qty-card addon-quantity" data-qty-card="addonQty-${addon.id}">
               <span><strong>${escapeHtml(cleanAddonName(addon.name))}</strong><small>${money(addon.price)} each</small></span>
-              <input type="number" name="addonQty-${addon.id}" min="0" step="1" value="0" inputmode="numeric" />
-            </label>`).join('') : '<p class="helper">No extra services configured.</p>'}
+              <div class="qty-control">
+                <button type="button" data-qty-minus="addonQty-${addon.id}" aria-label="Decrease ${escapeHtml(cleanAddonName(addon.name))}">-</button>
+                <input type="number" name="addonQty-${addon.id}" min="0" step="1" value="0" inputmode="numeric" />
+                <button type="button" data-qty-plus="addonQty-${addon.id}" aria-label="Increase ${escapeHtml(cleanAddonName(addon.name))}">+</button>
+              </div>
+            </div>`).join('') : '<p class="helper">No extra services configured.</p>'}
           </fieldset>
 
           <div id="price-preview" class="price-preview"></div>
@@ -677,10 +690,12 @@ function renderOrders(orders: OrderRow[], staff: Staff[], services: LaundryServi
   const activeOrders = orders.filter((order) => order.status !== 'claimed');
   const query = state.orderSearch.trim().toLowerCase();
   const dateFilter = state.orderDateFilter.trim();
+  const paymentFilter = state.orderPaymentFilter.trim().toLowerCase();
   const filteredOrders = activeOrders.filter((order) => {
     const matchesQuery = !query || [order.ticket, order.customer, order.phone, order.service, order.itemCategory, order.status].some((value) => String(value ?? '').toLowerCase().includes(query));
     const matchesDate = !dateFilter || localDateFromIso(order.createdAt) === dateFilter;
-    return matchesQuery && matchesDate;
+    const matchesPayment = !paymentFilter || orderPaymentStatus(order) === paymentFilter;
+    return matchesQuery && matchesDate && matchesPayment;
   });
 
   return `
@@ -695,6 +710,15 @@ function renderOrders(orders: OrderRow[], staff: Staff[], services: LaundryServi
           <label>
             <span>Filter date</span>
             <input name="orderDateFilter" type="date" value="${escapeHtml(state.orderDateFilter)}" />
+          </label>
+          <label>
+            <span>Payment</span>
+            <select name="orderPaymentFilter">
+              <option value="" ${state.orderPaymentFilter === '' ? 'selected' : ''}>All</option>
+              <option value="unpaid" ${state.orderPaymentFilter === 'unpaid' ? 'selected' : ''}>Unpaid</option>
+              <option value="partial" ${state.orderPaymentFilter === 'partial' ? 'selected' : ''}>Partial</option>
+              <option value="paid" ${state.orderPaymentFilter === 'paid' ? 'selected' : ''}>Paid</option>
+            </select>
           </label>
           <div class="search-actions queue-actions">
             <button class="primary" type="submit">Apply</button>
@@ -765,8 +789,9 @@ function renderOrderRow(order: OrderRow, staff: Staff[], services: LaundryServic
   const nextStep = steps.find((step) => !order.workflowCompleted.includes(step.key));
   const needsFoldStaff = nextStep?.key === 'fold';
   const needsExtraConfirmation = nextStep?.key === 'extras' && order.extras.length > 0;
-  const paymentStatus = order.paidAmount <= 0 ? 'Unpaid' : order.balance > 0 ? 'Partial' : 'Paid';
-  const paymentClass = paymentStatus === 'Paid' ? 'ok' : paymentStatus === 'Partial' ? 'warn' : 'meta';
+  const paymentStatus = orderPaymentStatus(order);
+  const paymentStatusLabel = paymentStatus.charAt(0).toUpperCase() + paymentStatus.slice(1);
+  const paymentClass = paymentStatus === 'paid' ? 'ok' : paymentStatus === 'partial' ? 'warn' : 'meta';
   const extrasLabel = order.extras.length
     ? order.extras.map((extra) => `${escapeHtml(cleanAddonName(extra.name))} x${Number(extra.quantity ?? 1)}`).join(', ')
     : '';
@@ -776,7 +801,7 @@ function renderOrderRow(order: OrderRow, staff: Staff[], services: LaundryServic
       <td>${escapeHtml(order.customer)}<div class="small">${escapeHtml(order.phone ?? '')}</div></td>
       <td>${escapeHtml(order.service)}${extrasLabel ? `<div class="small">Extras: ${extrasLabel}</div>` : ''}</td>
       <td class="amount-cell"><strong>${money(order.totalAmount)}</strong><div class="small">Bal ${money(order.balance)}</div></td>
-      <td><span class="payment-status ${paymentClass}">${paymentStatus}</span><div class="small">Paid ${money(order.paidAmount)}</div></td>
+      <td><span class="payment-status ${paymentClass}">${paymentStatusLabel}</span><div class="small">Paid ${money(order.paidAmount)}</div></td>
       <td>
         <div class="${order.status === 'ready' || order.status === 'claimed' ? 'ok' : 'warn'}">${escapeHtml(order.status)}</div>
         <div class="workflow-progress">
@@ -811,12 +836,14 @@ function renderOrderRow(order: OrderRow, staff: Staff[], services: LaundryServic
 function renderReceipt(order: OrderRow, payments: Payment[]) {
   const tendered = payments.reduce((sum, payment) => sum + Number(payment.amount), 0);
   const change = Math.max(0, Number((tendered - order.totalAmount).toFixed(2)));
-  const paymentStatus = order.paidAmount <= 0 ? 'Unpaid' : order.balance > 0 ? 'Partial' : 'Paid';
+  const paymentStatus = orderPaymentStatus(order);
+  const paymentStatusLabel = paymentStatus.charAt(0).toUpperCase() + paymentStatus.slice(1);
   return `
     <div class="modal-backdrop" role="presentation">
       <div class="receipt-modal" role="dialog" aria-modal="true" aria-labelledby="receipt-title">
         <div class="modal-actions">
           <button class="secondary" type="button" data-print-receipt>Print</button>
+          <button class="secondary" type="button" data-thermal-print>Thermal</button>
           <button class="secondary" type="button" data-close-receipt>Close</button>
         </div>
         <div class="receipt" id="receipt-print-area">
@@ -834,7 +861,7 @@ function renderReceipt(order: OrderRow, payments: Payment[]) {
             <div><span>Total</span><strong>${money(order.totalAmount)}</strong></div>
             <div><span>Tendered</span><strong>${money(tendered)}</strong></div>
             <div><span>Paid</span><strong>${money(order.paidAmount)}</strong></div>
-            <div><span>Payment status</span><strong>${paymentStatus}</strong></div>
+            <div><span>Payment status</span><strong>${paymentStatusLabel}</strong></div>
             <div><span>Change</span><strong>${money(change)}</strong></div>
             <div><span>Balance</span><strong>${money(order.balance)}</strong></div>
           </div>
@@ -875,6 +902,66 @@ body{margin:0;background:#fff;color:#061a42;font-family:Arial,sans-serif}.receip
     files: [uri],
     dialogTitle: 'Print receipt',
   });
+}
+
+function receiptThermalText() {
+  const receipt = document.querySelector<HTMLElement>('#receipt-print-area');
+  if (!receipt) return 'Laba101\n';
+  const lines = Array.from(receipt.querySelectorAll<HTMLElement>('.receipt-head, .receipt-customer, .receipt-lines div, .receipt-payments div'))
+    .map((row) => row.innerText.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+  return [
+    'LABA101',
+    '------------------------',
+    ...lines,
+    '------------------------',
+    'Thank you!',
+    '',
+    '',
+  ].join('\n');
+}
+
+async function thermalPrintCurrentReceipt() {
+  const nav = navigator as Navigator & { bluetooth?: any };
+  if (!nav.bluetooth?.requestDevice) {
+    await printCurrentReceipt();
+    return;
+  }
+
+  const serviceUuids = [
+    '0000ffe0-0000-1000-8000-00805f9b34fb',
+    '0000ff00-0000-1000-8000-00805f9b34fb',
+    '49535343-fe7d-4ae5-8fa9-9fafd205e455',
+  ];
+  const device = await nav.bluetooth.requestDevice({
+    acceptAllDevices: true,
+    optionalServices: serviceUuids,
+  });
+  const server = await device.gatt.connect();
+  const services = await server.getPrimaryServices();
+  let writable: any = null;
+  for (const service of services) {
+    const characteristics = await service.getCharacteristics();
+    writable = characteristics.find((characteristic: any) => {
+      const props = characteristic.properties;
+      return props.write || props.writeWithoutResponse;
+    });
+    if (writable) break;
+  }
+  if (!writable) throw new Error('No writable Bluetooth printer channel found.');
+
+  const encoder = new TextEncoder();
+  const payload = new Uint8Array([
+    0x1b, 0x40,
+    ...encoder.encode(receiptThermalText()),
+    0x1d, 0x56, 0x00,
+  ]);
+  const chunkSize = 180;
+  for (let index = 0; index < payload.length; index += chunkSize) {
+    const chunk = payload.slice(index, index + chunkSize);
+    if (writable.properties.writeWithoutResponse) await writable.writeValueWithoutResponse(chunk);
+    else await writable.writeValue(chunk);
+  }
 }
 
 function renderCustomers(customers: Customer[], orders: OrderRow[]) {
@@ -1416,6 +1503,11 @@ function bindNavigation() {
       alert(error instanceof Error ? error.message : 'Receipt could not be printed.');
     });
   });
+  document.querySelector<HTMLButtonElement>('[data-thermal-print]')?.addEventListener('click', () => {
+    void thermalPrintCurrentReceipt().catch((error) => {
+      alert(error instanceof Error ? error.message : 'Bluetooth thermal print failed. Use Print instead, or install a native Bluetooth printer plugin. ' + error.message);
+    });
+  });
   document.querySelectorAll<HTMLElement>('[data-report-tab]').forEach((button) => {
     button.addEventListener('click', () => {
       state.dailyReportTab = button.dataset.reportTab as 'expenses' | 'sales';
@@ -1491,7 +1583,23 @@ function defaultCategoryForService(service: LaundryService | undefined, categori
 }
 
 function defaultWeightForService(service: LaundryService, category: ItemCategory) {
-  return Math.max(1, Number(service.maxKg || category.maxKg || 1));
+  return Math.max(1, Number(category.maxKg || service.maxKg || 1));
+}
+
+function serviceQuantitiesFromForm(form: HTMLFormElement, services: LaundryService[]) {
+  return Object.fromEntries(
+    services
+      .filter((service) => service.serviceType === 'order')
+      .map((service) => [service.id, Number((form.querySelector<HTMLInputElement>(`input[name="serviceQty-${service.id}"]`)?.value ?? 0))])
+      .filter(([, quantity]) => Number(quantity) > 0),
+  ) as Record<number, number>;
+}
+
+function serviceInputsFromForm(form: HTMLFormElement, services: LaundryService[]) {
+  const quantities = serviceQuantitiesFromForm(form, services);
+  return services
+    .filter((service) => service.serviceType === 'order' && Number(quantities[service.id] ?? 0) > 0)
+    .map((service) => ({ ...service, quantity: Number(quantities[service.id]) }));
 }
 
 function addonQuantitiesFromForm(form: HTMLFormElement, services: LaundryService[]) {
@@ -1535,27 +1643,61 @@ function bindOrderForms(data: Awaited<ReturnType<typeof loadData>>) {
       if (!isGcash) paymentReference.value = '';
     }
   };
+  const setQuantity = (name: string, delta: number) => {
+    if (!form) return;
+    const input = form.querySelector<HTMLInputElement>(`input[name="${name}"]`);
+    if (!input) return;
+    input.value = String(Math.max(0, Number(input.value || 0) + delta));
+    input.closest<HTMLElement>('.qty-card')?.classList.toggle('is-selected', Number(input.value) > 0);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  form?.querySelectorAll<HTMLInputElement>('.qty-control input').forEach((input) => {
+    input.addEventListener('input', () => {
+      input.value = String(Math.max(0, Number(input.value || 0)));
+      input.closest<HTMLElement>('.qty-card')?.classList.toggle('is-selected', Number(input.value) > 0);
+    });
+  });
+  form?.querySelectorAll<HTMLElement>('[data-qty-card]').forEach((card) => {
+    card.addEventListener('click', (event) => {
+      const target = event.target as HTMLElement;
+      if (target.closest('input') || target.closest('button')) return;
+      setQuantity(card.dataset.qtyCard ?? '', 1);
+    });
+  });
+  form?.querySelectorAll<HTMLButtonElement>('[data-qty-plus]').forEach((button) => {
+    button.addEventListener('click', () => setQuantity(button.dataset.qtyPlus ?? '', 1));
+  });
+  form?.querySelectorAll<HTMLButtonElement>('[data-qty-minus]').forEach((button) => {
+    button.addEventListener('click', () => setQuantity(button.dataset.qtyMinus ?? '', -1));
+  });
   const refreshPreview = () => {
     if (!form || !preview) return;
-    const formData = new FormData(form);
-    const service = data.services.find((item) => item.id === Number(formData.get('serviceId')));
-    const category = defaultCategoryForService(service, data.categories);
+    const selectedServices = serviceInputsFromForm(form, data.services);
+    const primaryService = selectedServices[0];
+    const category = defaultCategoryForService(primaryService, data.categories);
     const addons = addonInputsFromForm(form, data.services);
-    if (!service || !category) return;
-    const price = calculatePricing(service, category, defaultWeightForService(service, category), addons);
-    const selectedExtras = price.extras.map((addon) => `${cleanAddonName(addon.name)} x${addon.quantity}`);
-    const overweight = price.extraKg > 0;
-    if (saveButton) saveButton.disabled = overweight;
-    if (orderError) {
-      orderError.hidden = !overweight;
-      orderError.textContent = price.warning ?? '';
+    if (!selectedServices.length || !primaryService || !category) {
+      if (saveButton) saveButton.disabled = true;
+      if (orderError) {
+        orderError.hidden = false;
+        orderError.textContent = 'Please select at least one service quantity.';
+      }
+      preview.innerHTML = '<div class="preview-total"><span>Total amount</span><strong>PHP 0.00</strong></div>';
+      return;
     }
-    preview.classList.toggle('has-error', overweight);
+    const price = calculatePricing(selectedServices, category, defaultWeightForService(primaryService, category), addons);
+    const selectedServiceLabels = price.serviceLines.map((line) => `${line.name} x${line.quantity}`);
+    const selectedExtras = price.extras.map((addon) => `${cleanAddonName(addon.name)} x${addon.quantity}`);
+    if (saveButton) saveButton.disabled = false;
+    if (orderError) {
+      orderError.hidden = true;
+      orderError.textContent = '';
+    }
+    preview.classList.remove('has-error');
     preview.innerHTML = `
-      <div class="preview-line"><span>Base price</span><strong>${money(price.price)}</strong></div>
+      <div class="preview-line"><span>Services${selectedServiceLabels.length ? ` (${escapeHtml(selectedServiceLabels.join(', '))})` : ''}</span><strong>${money(price.price)}</strong></div>
       ${price.extraServiceAmount > 0 ? `<div class="preview-line"><span>Extra services${selectedExtras.length ? ` (${escapeHtml(selectedExtras.join(', '))})` : ''}</span><strong>${money(price.extraServiceAmount)}</strong></div>` : ''}
       <div class="preview-total"><span>Total amount</span><strong>${money(price.totalAmount)}</strong></div>
-      ${price.warning ? `<span class="warn">${escapeHtml(price.warning)}</span>` : ''}
     `;
   };
   customerSelect?.addEventListener('change', syncCustomer);
@@ -1567,28 +1709,26 @@ function bindOrderForms(data: Awaited<ReturnType<typeof loadData>>) {
   form?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const fd = new FormData(form);
-    const service = data.services.find((item) => item.id === Number(fd.get('serviceId')));
-    const category = defaultCategoryForService(service, data.categories);
+    const selectedServices = serviceInputsFromForm(form, data.services);
+    const primaryService = selectedServices[0];
+    const category = defaultCategoryForService(primaryService, data.categories);
     const addons = addonInputsFromForm(form, data.services);
-    if (service && category) {
-      const price = calculatePricing(service, category, defaultWeightForService(service, category), addons);
-      if (price.extraKg > 0) {
-        if (orderError) {
-          orderError.hidden = false;
-          orderError.textContent = price.warning ?? 'Weight exceeds the allowed limit.';
-        }
-        return;
+    if (!selectedServices.length) {
+      if (orderError) {
+        orderError.hidden = false;
+        orderError.textContent = 'Please select at least one service quantity.';
       }
+      return;
     }
     try {
       await createOrder({
         customerId: Number(fd.get('customerId')) || undefined,
         customerName: String(fd.get('customerName') ?? ''),
         customerPhone: String(fd.get('customerPhone') ?? '') || null,
-        serviceId: Number(fd.get('serviceId')),
+        serviceQuantities: serviceQuantitiesFromForm(form, data.services),
         branch: data.branch,
         itemCategoryId: category?.id,
-        weightKg: service && category ? defaultWeightForService(service, category) : undefined,
+        weightKg: primaryService && category ? defaultWeightForService(primaryService, category) : undefined,
         addonQuantities: addonQuantitiesFromForm(form, data.services),
         paidAmount: Number(fd.get('paidAmount') ?? 0),
         paymentMethod: String(fd.get('paymentMethod') ?? 'cash') as 'cash' | 'gcash',
@@ -1971,12 +2111,14 @@ function bindOrderFilters() {
     const fd = new FormData(event.currentTarget);
     state.orderSearch = String(fd.get('orderSearch') ?? '').trim();
     state.orderDateFilter = String(fd.get('orderDateFilter') ?? '').trim();
+    state.orderPaymentFilter = String(fd.get('orderPaymentFilter') ?? '').trim();
     void render();
   });
 
   document.querySelector<HTMLButtonElement>('#order-queue-clear')?.addEventListener('click', () => {
     state.orderSearch = '';
     state.orderDateFilter = '';
+    state.orderPaymentFilter = '';
     void render();
   });
 

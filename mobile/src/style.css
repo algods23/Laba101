@@ -725,7 +725,7 @@ button {
 
 .queue-filters {
   display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(180px, 0.7fr) auto;
+  grid-template-columns: minmax(0, 1.25fr) minmax(150px, 0.65fr) minmax(150px, 0.65fr) auto;
   gap: 12px;
   align-items: end;
   margin-bottom: 14px;
@@ -1260,15 +1260,16 @@ legend {
   min-height: auto;
 }
 
-.service-picker {
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+.service-picker,
+.check-grid {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
 }
 
 .service-option,
 .addon-quantity {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
   border: 1px solid var(--line);
   border-radius: 16px;
@@ -1276,26 +1277,19 @@ legend {
   padding: 12px;
 }
 
-.service-option {
+.qty-card {
   cursor: pointer;
 }
 
-.service-option:has(input:checked) {
+.qty-card.is-selected {
   border-color: var(--navy);
   background: #eef4ff;
   box-shadow: inset 0 0 0 1px var(--navy);
 }
 
-.service-option input {
-  width: 20px;
-  min-height: 20px;
-  flex: 0 0 auto;
-}
-
 .service-option span,
 .addon-quantity span {
   display: grid;
-  flex: 1;
   gap: 3px;
   min-width: 0;
 }
@@ -1311,10 +1305,32 @@ legend {
   white-space: nowrap;
 }
 
-.addon-quantity input {
-  width: 82px;
-  min-height: 42px;
-  flex: 0 0 auto;
+.qty-control {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 40px 72px 40px;
+  justify-content: end;
+  gap: 6px;
+  width: 100%;
+}
+
+.qty-control button,
+.qty-control input {
+  min-height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--navy);
+  font-weight: 900;
+}
+
+.qty-control button {
+  padding: 0;
+}
+
+.qty-control input {
+  width: 72px;
+  padding: 0 8px;
   text-align: center;
 }
 
@@ -1607,8 +1623,9 @@ legend {
 .receipt {
   border-style: dashed;
   border-color: #9aabc8;
-  border-radius: 18px;
-  padding: 16px;
+  border-radius: 14px;
+  padding: 12px;
+  margin: 0 auto;
 }
 
 .modal-backdrop {
@@ -1618,17 +1635,17 @@ legend {
   display: grid;
   place-items: center;
   background: rgba(3, 19, 54, 0.58);
-  padding: 18px;
+  padding: 10px;
 }
 
 .receipt-modal {
-  width: min(460px, 100%);
+  width: min(380px, 100%);
   max-height: min(760px, calc(100vh - 36px));
   overflow: auto;
   border: 1px solid rgba(255, 255, 255, 0.82);
-  border-radius: 20px;
+  border-radius: 16px;
   background: #fff;
-  padding: 14px;
+  padding: 10px;
   box-shadow: 0 28px 80px rgba(3, 19, 54, 0.34);
 }
 
@@ -1640,11 +1657,12 @@ legend {
   justify-content: flex-end;
   gap: 8px;
   background: #fff;
-  padding-bottom: 12px;
+  padding-bottom: 8px;
 }
 
 .modal-actions button {
-  min-height: 42px;
+  min-height: 38px;
+  padding: 0 12px;
 }
 
 .receipt-head,
@@ -1658,7 +1676,7 @@ legend {
 
 .receipt-head {
   border-bottom: 1px dashed #b9c5dc;
-  padding-bottom: 12px;
+  padding-bottom: 8px;
 }
 
 .receipt-head h3,
@@ -1678,22 +1696,22 @@ legend {
 
 .receipt-customer {
   border-bottom: 1px dashed #d7def0;
-  padding: 12px 0;
+  padding: 8px 0;
 }
 
 .receipt-lines {
-  margin-top: 12px;
+  margin-top: 8px;
 }
 
 .receipt-payments {
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .receipt-payments div {
   border-radius: 12px;
   background: #f8fbff;
-  padding: 10px 12px;
+  padding: 7px 9px;
 }
 
 .receipt-payments small {
