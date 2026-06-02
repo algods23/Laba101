@@ -86,6 +86,44 @@ Debug APK output:
 mobile\android\app\build\outputs\apk\debug\app-debug.apk
 ```
 
+Copy a shareable installer (same APK, easier name):
+
+```powershell
+.\package-installer.ps1
+```
+
+Output:
+
+```text
+mobile\installer\Laba101-installer.apk
+```
+
+Copy that file to another phone and open it to install (allow installs from unknown sources if prompted).
+
+## Fresh install defaults (first open on a new device)
+
+When the app is installed on a device that has never run Laba101 before, SQLite is empty and these defaults are created automatically:
+
+| Role | Branch | Email (username) | Password |
+|------|--------|------------------|----------|
+| Admin | Main Store | `admin@laba101.test` | `password` |
+| Staff | Gensan Branch | `staff@laba101.gensan` | `password` |
+
+Default services (Pricing tab):
+
+| Service | Price | Includes |
+|---------|-------|----------|
+| Self Service Wash | ₱60 | Wash |
+| Self Service Dry | ₱70 | Dry (40 mins) |
+| Drop-off | ₱185 | Wash, dry, fold |
+| Full Service | ₱200 | Wash, Fabcon, detergent, dry, fold |
+
+Optional add-ons (extra dry time, Zonrox, Fabcon) are also seeded for POS.
+
+No sample orders or customers are included on a fresh install.
+
+To reset an existing phone to these defaults, uninstall the app or clear app storage in Android settings, then install again.
+
 ## Install On Android Device
 Enable USB debugging on the Android device, connect it, then run:
 

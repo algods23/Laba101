@@ -1763,9 +1763,9 @@ legend {
 }
 
 .receipt-staff {
-  margin: 12px 0 0;
-  padding-top: 10px;
-  border-top: 1px dashed #b9c5dc;
+  margin: 0 0 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed #b9c5dc;
   font-size: 0.82rem;
   font-weight: 600;
   color: #061a42;

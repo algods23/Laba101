@@ -586,8 +586,8 @@ function renderLogin() {
           </header>
           ${state.loginError ? `<div class="alert">${escapeHtml(state.loginError)}</div>` : ''}
           <form id="login-form" class="form">
-            <label>Email address<input name="email" type="email" autocomplete="username" placeholder="admin@laba101.test" required /></label>
-            <label>Password<input name="password" type="password" autocomplete="current-password" placeholder="Enter password" required /></label>
+            <label>Email address<input name="email" type="email" autocomplete="username" placeholder="admin@laba101.test or staff@laba101.gensan" required /></label>
+            <label>Password<input name="password" type="password" autocomplete="current-password" placeholder="password" required /></label>
             <label class="remember"><input name="remember" type="checkbox" value="1" /> Remember me on this device</label>
             <button class="primary" id="login-button" type="submit">Sign in</button>
           </form>
@@ -891,6 +891,7 @@ function renderReceipt(order: OrderRow, payments: Payment[]) {
             <h3 id="receipt-title">Laba101</h3>
             <p>${escapeHtml(order.ticket)}<br>${escapeHtml(formatDate(order.createdAt))}</p>
           </div>
+          ${state.currentUser ? `<p class="receipt-staff">Staff: ${escapeHtml(state.currentUser.name)}</p>` : ''}
           <div class="receipt-customer">
             <strong>${escapeHtml(order.customer)}</strong>
             <span>${escapeHtml(order.phone ?? 'No phone')}</span>
@@ -909,7 +910,6 @@ function renderReceipt(order: OrderRow, payments: Payment[]) {
           <div class="receipt-payments">
             ${payments.map((payment) => `<div><span>${escapeHtml(payment.method.toUpperCase())}</span><strong>${money(payment.amount)}</strong>${payment.reference ? `<small>Ref ${escapeHtml(payment.reference)}</small>` : ''}</div>`).join('') || '<p class="helper">No payments yet.</p>'}
           </div>
-          ${state.currentUser ? `<p class="receipt-staff">Staff: ${escapeHtml(state.currentUser.name)}</p>` : ''}
         </div>
       </div>
     </div>

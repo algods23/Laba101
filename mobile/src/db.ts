@@ -176,25 +176,30 @@ const freshStartResetKey = 'fresh_start_reset_v1';
 const sqlite = new SQLiteConnection(CapacitorSQLite);
 let nativeDb: SQLiteDBConnection | null = null;
 
+/** Default logins bundled on a fresh APK install (offline SQLite). */
+export const defaultLoginAccounts = [
+  { role: 'Admin', branch: 'Main Store', email: 'admin@laba101.test', password: 'password' },
+  { role: 'Staff (Gensan)', branch: 'Gensan Branch', email: 'staff@laba101.gensan', password: 'password' },
+] as const;
+
 const seedStaff: Staff[] = [
   { id: 1, name: 'Laba101 Admin', email: 'admin@laba101.test', password: 'password', role: 'admin', branch: 'Main Store' },
-  { id: 2, name: 'Gensan Staff', email: 'staff@laba101.gensan', password: 'password', role: 'staff', branch: 'Gensan Branch' },
+  { id: 2, name: 'Gensan Branch Staff', email: 'staff@laba101.gensan', password: 'password', role: 'staff', branch: 'Gensan Branch' },
 ];
 
 const seedCustomers: Customer[] = [];
 
+/** Core laundry services (fresh install). Add-ons are optional extras for POS. */
 const seedServices: LaundryService[] = [
-  serviceSeed(1, 'Drop-off', 'Wash, dry and fold.', 'Drop-Off', 'order', 185, 8, 40, ['Wash', 'Dry', 'Fold'], 0, 24),
-  serviceSeed(2, 'Full Service', 'Wash, dry, fold, detergent and Fabcon.', 'Full Service', 'order', 200, 8, 40, ['Wash', 'Dry', 'Fold', 'Detergent', 'Fabcon'], 0, 24),
-  serviceSeed(3, 'Self Service Wash', 'Max of 8kg per load.', 'Self Service', 'order', 60, 8, null, ['Wash'], 0, 1),
-  serviceSeed(4, 'Self Service Dry', 'Regular time: 40 mins drying time.', 'Self Service', 'order', 70, 8, 40, ['Dry'], 0, 1),
-  serviceSeed(5, 'Dry Only', 'Standard drying rate.', 'Dry Only', 'order', 70, 8, 40, ['Dry'], 0, 1),
-  serviceSeed(6, 'Additional Dry 10 mins', 'Additional drying time.', 'Add-on', 'addon', 30, 8, 10, ['Dry'], 0, 1),
-  serviceSeed(7, 'Additional Dry 20 mins', 'Additional drying time.', 'Add-on', 'addon', 50, 8, 20, ['Dry'], 0, 1),
-  serviceSeed(8, 'Additional Dry 40 mins', 'Additional drying time.', 'Add-on', 'addon', 70, 8, 40, ['Dry'], 0, 1),
+  serviceSeed(1, 'Drop-off', 'P185. Includes wash, dry, and fold.', 'Drop-Off', 'order', 185, 8, 40, ['Wash', 'Dry', 'Fold'], 0, 24),
+  serviceSeed(2, 'Full Service', 'P200. Wash, Fabcon, detergent, dry, and fold.', 'Full Service', 'order', 200, 8, 40, ['Wash', 'Dry', 'Fold', 'Detergent', 'Fabcon'], 0, 24),
+  serviceSeed(3, 'Self Service Wash', 'P60. Self-service wash (max 8kg per load).', 'Self Service', 'order', 60, 8, null, ['Wash'], 0, 1),
+  serviceSeed(4, 'Self Service Dry', 'P70. Self-service dry (40 mins).', 'Self Service', 'order', 70, 8, 40, ['Dry'], 0, 1),
+  serviceSeed(6, 'Dry 10 mins', 'Additional drying time (10 mins).', 'Add-on', 'addon', 30, 8, 10, ['Dry'], 0, 1),
+  serviceSeed(7, 'Dry 20 mins', 'Additional drying time (20 mins).', 'Add-on', 'addon', 50, 8, 20, ['Dry'], 0, 1),
+  serviceSeed(8, 'Dry 40 mins', 'Additional drying time (40 mins).', 'Add-on', 'addon', 70, 8, 40, ['Dry'], 0, 1),
   serviceSeed(9, 'Additional Zonrox', 'Extra Zonrox bleach add-on per load.', 'Add-on', 'addon', 25, 0, null, ['Zonrox'], 0, 0),
   serviceSeed(10, 'Additional Fabcon', 'Extra Fabcon fabric conditioner add-on per load.', 'Add-on', 'addon', 25, 0, null, ['Fabcon'], 0, 0),
-  serviceSeed(11, 'Comforter / Bulky Load', 'Comforter 4kg max per load. Thin blankets, bedsheets, bath towels, pillow cases and curtains: 6kg max per load.', 'Comforter', 'order', 200, 8, 40, ['Wash', 'Dry', 'Fold'], 0, 24),
 ];
 
 const seedItemCategories: ItemCategory[] = [
@@ -418,6 +423,22 @@ async function ensureNativeSeedSettings(db: SQLiteDBConnection) {
   }
 }
 
+async function seedNativeInitialCatalog(db: SQLiteDBConnection) {
+  for (const service of seedServices) {
+    const existing = await db.query('SELECT id FROM laundry_services WHERE id = ?', [service.id]);
+    if ((existing.values ?? []).length > 0) continue;
+    await db.run(
+      'INSERT INTO laundry_services (id, name, description, category, serviceType, price, maxKg, dryingMinutes, includes, additionalCharge, turnaroundHours, isActive) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [service.id, service.name, service.description, service.category, service.serviceType, service.price, service.maxKg, service.dryingMinutes, JSON.stringify(service.includes), service.additionalCharge, service.turnaroundHours, service.isActive],
+    );
+  }
+  for (const category of seedItemCategories) {
+    const existing = await db.query('SELECT id FROM item_categories WHERE id = ?', [category.id]);
+    if ((existing.values ?? []).length > 0) continue;
+    await db.run('INSERT INTO item_categories (id, name, maxKg, additionalFee, isActive) VALUES (?, ?, ?, ?, ?)', [category.id, category.name, category.maxKg, category.additionalFee, category.isActive]);
+  }
+}
+
 async function resetNativeToFreshStart(db: SQLiteDBConnection) {
   const reset = await db.query('SELECT value FROM settings WHERE key = ?', [freshStartResetKey]);
   if ((reset.values ?? []).length > 0) return;
@@ -433,6 +454,7 @@ async function resetNativeToFreshStart(db: SQLiteDBConnection) {
     DELETE FROM staff WHERE id NOT IN (1, 2);
   `);
   await ensureNativeSeedStaff(db);
+  await seedNativeInitialCatalog(db);
   await ensureNativeSeedMachines(db);
   await ensureNativeSeedSettings(db);
   await db.run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [freshStartResetKey, nowIso()]);
@@ -556,7 +578,8 @@ async function ensureSchema() {
   await addColumnIfMissing(db, 'daily_sales', 'statusUpdatedAt', 'TEXT');
 
   const staffCount = await db.query('SELECT COUNT(*) as count FROM staff');
-  if (((staffCount.values?.[0] as { count: number } | undefined)?.count ?? 0) === 0) {
+  const isFreshInstall = ((staffCount.values?.[0] as { count: number } | undefined)?.count ?? 0) === 0;
+  if (isFreshInstall) {
     for (const staff of seedStaff) await db.run('INSERT INTO staff (id, name, email, password, role, branch, isActive) VALUES (?, ?, ?, ?, ?, ?, ?)', [staff.id, staff.name, staff.email, staff.password, staff.role, staff.branch, 1]);
     for (const customer of seedCustomers) await db.run('INSERT INTO customers (id, name, phone, address) VALUES (?, ?, ?, ?)', [customer.id, customer.name, customer.phone, customer.address]);
     for (const service of seedServices) await db.run('INSERT INTO laundry_services (id, name, description, category, serviceType, price, maxKg, dryingMinutes, includes, additionalCharge, turnaroundHours, isActive) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [service.id, service.name, service.description, service.category, service.serviceType, service.price, service.maxKg, service.dryingMinutes, JSON.stringify(service.includes), service.additionalCharge, service.turnaroundHours, service.isActive]);
@@ -568,10 +591,12 @@ async function ensureSchema() {
     for (const rh of seedRevolvingHistory) await db.run('INSERT INTO revolving_history (id, revolvingNumber, name, amount, category, description, type, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [rh.id, rh.revolvingNumber, rh.name, rh.amount, rh.category, rh.description, rh.type, rh.createdAt]);
     for (const machine of seedMachines) await db.run('INSERT INTO machines (id, machineName, machineType, status, branch) VALUES (?, ?, ?, ?, ?)', [machine.id, machine.machineName, machine.machineType, machine.status, machine.branch]);
     for (const setting of seedSettings) await db.run('INSERT INTO settings (key, value) VALUES (?, ?)', [setting.key, setting.value]);
+    await db.run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', ['fresh_install_defaults', nowIso()]);
   }
 
   await syncSeedLaundryCatalog(db);
   await ensureNativeSeedStaff(db);
+  if (!isFreshInstall) await seedNativeInitialCatalog(db);
   await resetNativeToFreshStart(db);
 }
 
