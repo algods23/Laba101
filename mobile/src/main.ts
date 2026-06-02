@@ -4,6 +4,7 @@ import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import {
   advanceOrder,
+  cancelOrder,
   authenticateUser,
   calculatePricing,
   completeCleaning,
@@ -29,6 +30,7 @@ import {
   listStaff,
   listSubcleanings,
   recordPayment,
+  deleteOrderForRefund,
   saveDailySale,
   saveItemCategory,
   saveMachine,
@@ -768,14 +770,14 @@ function renderOrders(orders: OrderRow[], staff: Staff[], services: LaundryServi
           <div><span>Active queue</span><strong>${filteredOrders.length}</strong></div>
           <div><span>Claimed archived</span><strong>${orders.filter((order) => order.status === 'claimed').length}</strong></div>
         </div>
-        <div class="table-scroll">
-          <table class="data-table orders-data-table">
-            <thead><tr><th>Ticket</th><th>Customer</th><th>Service</th><th>Total</th><th>Payment</th><th>Status</th><th>Actions</th></tr></thead>
-            <tbody>
-              ${filteredOrders.map((order) => renderOrderRow(order, staff, services)).join('') || '<tr><td colspan="7" class="table-empty">No matching active orders.</td></tr>'}
-            </tbody>
-          </table>
-        </div>
+        <table class="data-table orders-data-table">
+          <thead>
+            <tr><th>Ticket</th><th>Customer</th><th>Service</th><th>Total Payment</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            ${filteredOrders.map((order) => renderOrderRow(order, staff, services)).join('') || '<tr><td colspan="5" class="table-empty">No matching active orders.</td></tr>'}
+          </tbody>
+        </table>
       </article>
       ${receipt ? renderReceipt(receipt, payments.filter((payment) => payment.orderId === receipt.id)) : ''}
     </section>
@@ -809,14 +811,14 @@ function renderArchivedOrders(orders: OrderRow[], staff: Staff[], services: Laun
           <div><span>Archived claims</span><strong>${filteredArchivedOrders.length}</strong></div>
           <div><span>Total claimed</span><strong>${archivedOrders.length}</strong></div>
         </div>
-        <div class="table-scroll">
-          <table class="data-table orders-data-table archived-orders-table">
-            <thead><tr><th>Ticket</th><th>Customer</th><th>Service</th><th>Total</th><th>Payment</th><th>Status</th><th>Actions</th></tr></thead>
-            <tbody>
-              ${filteredArchivedOrders.map((order) => renderOrderRow(order, staff, services)).join('') || '<tr><td colspan="7" class="table-empty">No archived orders found.</td></tr>'}
-            </tbody>
-          </table>
-        </div>
+        <table class="data-table orders-data-table archived-orders-table">
+          <thead>
+            <tr><th>Ticket</th><th>Customer</th><th>Service</th><th>Total Payment</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            ${filteredArchivedOrders.map((order) => renderOrderRow(order, staff, services)).join('') || '<tr><td colspan="5" class="table-empty">No archived orders found.</td></tr>'}
+          </tbody>
+        </table>
       </article>
       ${receipt ? renderReceipt(receipt, payments.filter((payment) => payment.orderId === receipt.id)) : ''}
     </section>
@@ -834,19 +836,15 @@ function renderOrderRow(order: OrderRow, staff: Staff[], services: LaundryServic
   const extrasLabel = order.extras.length
     ? order.extras.map((extra) => `${escapeHtml(cleanAddonName(extra.name))} x${Number(extra.quantity ?? 1)}`).join(', ')
     : '';
+  const isAdmin = state.currentUser?.role === 'admin';
+  const canCancel = order.status !== 'claimed' && order.paidAmount <= 0;
+  const canDelete = order.status !== 'claimed' && isAdmin && order.paidAmount > 0;
   return `
-    <tr>
+    <tr class="order-row-main">
       <td><strong>${escapeHtml(order.ticket)}</strong><div class="small">${escapeHtml(formatDate(order.createdAt))}</div></td>
       <td>${escapeHtml(order.customer)}<div class="small">${escapeHtml(order.phone ?? '')}</div></td>
       <td>${escapeHtml(order.service)}${extrasLabel ? `<div class="small">Extras: ${extrasLabel}</div>` : ''}</td>
-      <td class="amount-cell"><strong>${money(order.totalAmount)}</strong><div class="small">Bal ${money(order.balance)}</div></td>
-      <td><span class="payment-status ${paymentClass}">${paymentStatusLabel}</span><div class="small">Paid ${money(order.paidAmount)}</div></td>
-      <td>
-        <div class="${order.status === 'ready' || order.status === 'claimed' ? 'ok' : 'warn'}">${escapeHtml(order.status)}</div>
-        <div class="workflow-progress">
-          ${steps.map((step) => `<span class="${order.workflowCompleted.includes(step.key) ? 'is-done' : nextStep?.key === step.key ? 'is-next' : ''}">${escapeHtml(step.label)}</span>`).join('')}
-        </div>
-      </td>
+      <td class="amount-cell"><strong>${money(order.totalAmount)}</strong><div class="small">${escapeHtml(paymentStatusLabel)} · Paid ${money(order.paidAmount)} · Bal ${money(order.balance)}</div></td>
       <td>
       <div class="row-actions">
         ${nextStep ? `<form class="inline-form advance-form" data-order-id="${order.id}">
@@ -865,8 +863,20 @@ function renderOrderRow(order: OrderRow, staff: Staff[], services: LaundryServic
             <button class="secondary" type="submit">Pay</button>
           </form>
         ` : ''}
+        ${canCancel ? `<button class="secondary" type="button" data-cancel-order="${order.id}">Cancel</button>` : ''}
+        ${canDelete ? `<button class="secondary" type="button" data-delete-order="${order.id}">Delete</button>` : ''}
         <button class="secondary" data-receipt="${order.id}">Receipt</button>
       </div>
+      </td>
+    </tr>
+    <tr class="order-row-detail">
+      <td colspan="5">
+        <div class="order-detail-row">
+          <div class="${order.status === 'ready' || order.status === 'claimed' ? 'ok' : 'warn'}">${escapeHtml(order.status)}</div>
+          <div class="workflow-progress order-workflow-progress">
+            ${steps.map((step) => `<span class="${order.workflowCompleted.includes(step.key) ? 'is-done' : nextStep?.key === step.key ? 'is-next' : ''}">${escapeHtml(step.label)}</span>`).join('')}
+          </div>
+        </div>
       </td>
     </tr>
   `;
@@ -1863,6 +1873,36 @@ function bindOrderForms(data: Awaited<ReturnType<typeof loadData>>) {
       const fd = new FormData(paymentForm);
       await recordPayment(Number(paymentForm.dataset.orderId), { amount: Number(fd.get('amount')), method: String(fd.get('method')) as 'cash' | 'gcash', reference: String(fd.get('reference') ?? '') || null });
       await render();
+    });
+  });
+
+  document.querySelectorAll<HTMLButtonElement>('[data-cancel-order]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const orderId = Number(btn.dataset.cancelOrder);
+      if (!Number.isFinite(orderId)) return;
+      if (!confirm('Cancel this order? (No payment will be refunded.)')) return;
+      try {
+        if (state.receiptOrderId === orderId) state.receiptOrderId = 0;
+        await cancelOrder(orderId);
+        await render();
+      } catch (err) {
+        alert(err instanceof Error ? err.message : 'Cancel failed.');
+      }
+    });
+  });
+
+  document.querySelectorAll<HTMLButtonElement>('[data-delete-order]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const orderId = Number(btn.dataset.deleteOrder);
+      if (!Number.isFinite(orderId)) return;
+      if (!confirm('Delete this paid order and update sales?')) return;
+      try {
+        if (state.receiptOrderId === orderId) state.receiptOrderId = 0;
+        await deleteOrderForRefund(orderId);
+        await render();
+      } catch (err) {
+        alert(err instanceof Error ? err.message : 'Delete failed.');
+      }
     });
   });
 }

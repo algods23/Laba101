@@ -1051,6 +1051,65 @@ export async function listPayments(orderId?: number): Promise<Payment[]> {
   return (result.values ?? []) as Payment[];
 }
 
+export async function cancelOrder(orderId: number) {
+  const branch = await getBranch();
+  const orders = await listOrders(branch);
+  const order = orders.find((o) => o.id === orderId);
+  if (!order) return;
+
+  // Cancel is allowed only for unpaid orders.
+  if (order.paidAmount > 0) throw new Error('Cancel is only allowed for unpaid orders. Use Delete (admin) to refund paid orders.');
+
+  if (!Capacitor.isNativePlatform()) {
+    const allOrders = readBrowser<OrderRow[]>('orders', seedOrders);
+    const allPayments = readBrowser<Payment[]>('payments', seedPayments);
+    const allFoldLogs = readBrowser<FoldLog[]>('fold_logs', []);
+
+    const remainingOrders = allOrders.filter((o) => o.id !== orderId);
+    const remainingPayments = allPayments.filter((p) => p.orderId !== orderId);
+    const remainingFoldLogs = allFoldLogs.filter((log) => log.orderTicket !== order.ticket);
+
+    writeBrowser('orders', remainingOrders);
+    writeBrowser('payments', remainingPayments);
+    writeBrowser('fold_logs', remainingFoldLogs);
+    return;
+  }
+
+  const db = await ensureNativeDb();
+  await db.run('DELETE FROM payments WHERE orderId = ?', [orderId]);
+  await db.run('DELETE FROM fold_logs WHERE orderTicket = ?', [order.ticket]);
+  await db.run('DELETE FROM orders WHERE id = ?', [orderId]);
+}
+
+export async function deleteOrderForRefund(orderId: number) {
+  const branch = await getBranch();
+  const orders = await listOrders(branch);
+  const order = orders.find((o) => o.id === orderId);
+  if (!order) return;
+
+  if (order.paidAmount <= 0) throw new Error('Delete (refund) is only allowed for paid orders.');
+
+  if (!Capacitor.isNativePlatform()) {
+    const allOrders = readBrowser<OrderRow[]>('orders', seedOrders);
+    const allPayments = readBrowser<Payment[]>('payments', seedPayments);
+    const allFoldLogs = readBrowser<FoldLog[]>('fold_logs', []);
+
+    const remainingOrders = allOrders.filter((o) => o.id !== orderId);
+    const remainingPayments = allPayments.filter((p) => p.orderId !== orderId);
+    const remainingFoldLogs = allFoldLogs.filter((log) => log.orderTicket !== order.ticket);
+
+    writeBrowser('orders', remainingOrders);
+    writeBrowser('payments', remainingPayments);
+    writeBrowser('fold_logs', remainingFoldLogs);
+    return;
+  }
+
+  const db = await ensureNativeDb();
+  await db.run('DELETE FROM payments WHERE orderId = ?', [orderId]);
+  await db.run('DELETE FROM fold_logs WHERE orderTicket = ?', [order.ticket]);
+  await db.run('DELETE FROM orders WHERE id = ?', [orderId]);
+}
+
 export async function listFoldLogs(): Promise<FoldLog[]> {
   if (!Capacitor.isNativePlatform()) return readBrowser<FoldLog[]>('fold_logs', []);
   const db = await ensureNativeDb();

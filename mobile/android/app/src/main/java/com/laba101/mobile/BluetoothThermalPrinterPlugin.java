@@ -250,9 +250,7 @@ public class BluetoothThermalPrinterPlugin extends Plugin {
         writeLine(out, dateTime);
         out.write(new byte[] { 0x1B, 0x61, 0x00 });
         writeLine(out, repeat('-', lineWidth));
-        if (staffName != null && !staffName.isEmpty()) {
-            writeLine(out, "Staff: " + staffName);
-        }
+        
         if (customerName != null && !customerName.isEmpty()) {
             writeLine(out, "Customer: " + customerName);
         }
@@ -284,7 +282,12 @@ public class BluetoothThermalPrinterPlugin extends Plugin {
         out.write(new byte[] { 0x1B, 0x61, 0x01 });
         writeLine(out, "Thank you!");
         writeLine(out, "");
+        if (staffName != null && !staffName.isEmpty()) {
+            writeLine(out, "Staff: " + staffName);
+        }
         writeLine(out, "");
+        writeLine(out, "");
+         writeLine(out, "");
         writeLine(out, "");
         out.write(new byte[] { 0x1D, 0x56, 0x00 });
         return out.toByteArray();
