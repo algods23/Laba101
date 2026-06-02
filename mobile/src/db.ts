@@ -107,6 +107,8 @@ export type DailySale = {
   gcashAmount: number;
   totalAmount: number;
   notes: string | null;
+  status?: string | null;
+  endorsedTo?: string | null;
 };
 
 export type Machine = {
@@ -494,6 +496,8 @@ async function ensureSchema() {
   await addColumnIfMissing(db, 'orders', 'dueAt', 'TEXT');
   await addColumnIfMissing(db, 'orders', 'createdAt', 'TEXT NOT NULL DEFAULT ""');
   await addColumnIfMissing(db, 'daily_sales', 'saleNumber', 'TEXT');
+  await addColumnIfMissing(db, 'daily_sales', 'status', 'TEXT');
+  await addColumnIfMissing(db, 'daily_sales', 'endorsedTo', 'TEXT');
 
   const staffCount = await db.query('SELECT COUNT(*) as count FROM staff');
   if (((staffCount.values?.[0] as { count: number } | undefined)?.count ?? 0) === 0) {
@@ -964,7 +968,7 @@ export async function createExpense(input: { expenseDate: string; name: string; 
 export async function listDailySales(): Promise<DailySale[]> {
   if (!Capacitor.isNativePlatform()) return readBrowser<DailySale[]>('sales', seedSales);
   const db = await ensureNativeDb();
-  const result = await db.query('SELECT id, saleDate, COALESCE(saleNumber, "") as saleNumber, cashAmount, gcashAmount, totalAmount, notes FROM daily_sales ORDER BY saleDate DESC, id DESC');
+  const result = await db.query('SELECT id, saleDate, COALESCE(saleNumber, "") as saleNumber, cashAmount, gcashAmount, totalAmount, notes, status, endorsedTo FROM daily_sales ORDER BY saleDate DESC, id DESC');
   return (result.values ?? []) as DailySale[];
 }
 
@@ -990,6 +994,21 @@ export async function saveDailySale(input: { saleDate: string; cashAmount: numbe
     const id = Number((idResult.values?.[0] as { id: number }).id);
     await db.run('INSERT INTO daily_sales (saleDate, saleNumber, cashAmount, gcashAmount, totalAmount, notes) VALUES (?, ?, ?, ?, ?, ?)', [input.saleDate, `SALE-${String(id).padStart(2, '0')}`, input.cashAmount, input.gcashAmount, totalAmount, input.notes || null]);
   }
+}
+
+export async function updateDailySaleStatus(id: number, status: string, endorsedTo: string | null = null) {
+  if (!Capacitor.isNativePlatform()) {
+    const items = readBrowser<DailySale[]>('sales', seedSales);
+    const existing = items.find((item) => item.id === id);
+    if (existing) {
+      existing.status = status;
+      existing.endorsedTo = endorsedTo;
+      writeBrowser('sales', items);
+    }
+    return;
+  }
+  const db = await ensureNativeDb();
+  await db.run('UPDATE daily_sales SET status = ?, endorsedTo = ? WHERE id = ?', [status, endorsedTo, id]);
 }
 
 export async function listMachines(branch: string): Promise<Machine[]> {

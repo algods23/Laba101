@@ -38,6 +38,7 @@ import {
   getSetting,
   updateMachine,
   updateStaff,
+  updateDailySaleStatus,
   type Customer,
   type DailySale,
   type DisbursementExpense,
@@ -56,7 +57,7 @@ if (!app) throw new Error('App root not found');
 
 let dashboardClockTimer: number | undefined;
 
-type TabKey = 'dashboard' | 'orders' | 'archived' | 'customers' | 'pricing' | 'disbursements' | 'reports' | 'inventory' | 'maintenance' | 'staff' | 'settings';
+type TabKey = 'dashboard' | 'orders' | 'archived' | 'customers' | 'pricing' | 'disbursements' | 'reports' | 'inventory' | 'maintenance' | 'staff' | 'revolving' | 'settings';
 
 type ReportType = 'sales' | 'disbursement' | 'fold_count' | 'summary';
 
@@ -77,6 +78,7 @@ const tabLabels: Record<TabKey, string> = {
   inventory: 'Inventory',
   maintenance: 'Maintenance',
   staff: 'Staff',
+  revolving: 'Revolving Fund',
   settings: 'Settings',
 };
 
@@ -93,6 +95,9 @@ const state = {
   orderDateFilter: '',
   archivedOrderSearch: '',
   reportPreview: null as ReportPreviewState | null,
+  endorseModalOpen: false,
+  endorseSaleId: 0,
+  endorseSaleDate: '',
 };
 
 const serviceIncludeOptions = ['Wash', 'Dry', 'Fold', 'Detergent', 'Fabcon', 'Zonrox'] as const;
@@ -296,6 +301,7 @@ function navIcon(tab: TabKey) {
     inventory: 'IN',
     maintenance: 'MT',
     staff: 'ST',
+    revolving: 'RV',
     settings: 'SE',
   };
   return icons[tab];
@@ -410,6 +416,7 @@ async function render() {
         ${state.tab === 'inventory' ? renderInventory(data.services, data.categories) : ''}
         ${state.tab === 'maintenance' ? renderMaintenance(data.machines, data.subcleanings, data.branch) : ''}
         ${state.tab === 'staff' ? renderStaff(data.allStaff, data.branch) : ''}
+        ${state.tab === 'revolving' ? renderRevolving(data.sales) : ''}
         ${state.tab === 'settings' ? renderSettings(data.branch, data.foldRate, data.reportEmail) : ''}
       </main>
     </div>
@@ -424,13 +431,14 @@ async function render() {
   bindCustomerSearch();
   bindMaintenanceForms();
   bindStaffForms(data.allStaff);
+  bindRevolvingForms();
   bindSettingsForms();
   bindDashboardClock();
 }
 
 function visibleTabs(): TabKey[] {
   if (state.currentUser?.role === 'admin') return (Object.keys(tabLabels) as TabKey[]).filter((t) => t !== 'inventory');
-  return ['orders', 'archived', 'disbursements', 'reports', 'maintenance'];
+  return ['orders', 'archived', 'disbursements', 'reports', 'maintenance', 'revolving'];
 }
 
 function renderLogin() {
@@ -1935,4 +1943,102 @@ if (savedSession) {
     localStorage.removeItem(sessionKey);
   }
 }
+
+function renderRevolving(sales: DailySale[]) {
+  const revolvingTotal = sales
+    .filter(s => s.status === 'revolving')
+    .reduce((sum, s) => sum + s.cashAmount, 0);
+
+  return `
+    <section class="grid content full">
+      <article class="panel">
+        <div style="background-color: #061a42; color: white; padding: 24px; border-radius: 12px; margin-bottom: 24px;">
+          <p style="font-size: 12px; font-weight: bold; opacity: 0.8; text-transform: uppercase; margin: 0 0 8px 0;">Revolving Fund Total</p>
+          <p style="font-size: 32px; font-weight: 800; margin: 0;">${money(revolvingTotal)}</p>
+        </div>
+        ${sectionTitle('Daily Summary', 'Daily sales history with status tracking')}
+        
+        <div class="table">
+          <div class="table-head"><div>Date of Sales</div><div>Cash-on Hand</div><div>Status</div><div>Action</div></div>
+          ${sales.length === 0 ? '<div class="helper">No daily sales found.</div>' : ''}
+          ${sales.map(sale => `
+            <div class="table-row">
+              <div><strong>${formatDate(sale.saleDate)}</strong></div>
+              <div><strong style="color: #15803d;">${money(sale.cashAmount)}</strong></div>
+              <div>
+                ${sale.status === 'revolving' ? '<span class="ok">Revolving</span>' : sale.status === 'endorsed' ? `<span class="warn">Endorsed to ${escapeHtml(sale.endorsedTo)}</span>` : '<span class="meta">Pending</span>'}
+              </div>
+              <div class="row-actions">
+                ${sale.status !== 'revolving' ? `<button class="primary revolving-btn" data-id="${sale.id}">Revolving</button>` : ''}
+                ${sale.status !== 'endorsed' ? `<button class="secondary endorsed-btn" data-id="${sale.id}" data-date="${formatDate(sale.saleDate)}">Endorsed</button>` : ''}
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </article>
+
+      ${state.endorseModalOpen ? `
+        <div class="modal-backdrop" role="presentation">
+          <div class="receipt-modal" role="dialog" aria-modal="true" style="max-width: 400px; width: 90%;">
+            <form id="endorse-form" class="form" style="padding: 24px;">
+              <h3 style="margin-top: 0;">Endorse Money</h3>
+              <p class="meta" style="margin-bottom: 16px;">Endorsing cash from <strong>${escapeHtml(state.endorseSaleDate)}</strong>.</p>
+              
+              <label>Endorsed to (Name)
+                <input name="endorsedTo" type="text" placeholder="Enter name" required />
+              </label>
+              
+              <div class="modal-actions" style="margin-top: 24px; padding: 0;">
+                <button class="primary" type="submit">Submit Endorsement</button>
+                <button class="secondary" type="button" id="close-endorse-modal">Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ` : ''}
+    </section>
+  `;
+}
+
+function bindRevolvingForms() {
+  document.querySelectorAll<HTMLButtonElement>('.revolving-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = Number(btn.dataset.id);
+      await updateDailySaleStatus(id, 'revolving');
+      await render();
+    });
+  });
+
+  document.querySelectorAll<HTMLButtonElement>('.endorsed-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      state.endorseModalOpen = true;
+      state.endorseSaleId = Number(btn.dataset.id);
+      state.endorseSaleDate = btn.dataset.date ?? '';
+      await render();
+    });
+  });
+
+  const closeEndorseBtn = document.getElementById('close-endorse-modal');
+  if (closeEndorseBtn) {
+    closeEndorseBtn.addEventListener('click', async () => {
+      state.endorseModalOpen = false;
+      await render();
+    });
+  }
+
+  const endorseForm = document.getElementById('endorse-form') as HTMLFormElement | null;
+  if (endorseForm) {
+    endorseForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(endorseForm);
+      const endorsedTo = String(fd.get('endorsedTo') ?? '').trim();
+      if (!endorsedTo) return;
+      
+      await updateDailySaleStatus(state.endorseSaleId, 'endorsed', endorsedTo);
+      state.endorseModalOpen = false;
+      await render();
+    });
+  }
+}
+
 await render();
