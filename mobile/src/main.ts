@@ -79,8 +79,14 @@ type BluetoothThermalPrinterPlugin = {
     storeName: string;
     receiptNumber: string;
     dateTime: string;
+    customerName: string;
+    customerPhone: string;
     items: Array<{ name: string; quantity: number; price: number }>;
     totalAmount: number;
+    paidAmount: number;
+    changeAmount: number;
+    balanceAmount: number;
+    staffName: string;
   }): Promise<{ printed: boolean; address: string }>;
 };
 
@@ -875,7 +881,6 @@ function renderReceipt(order: OrderRow, payments: Payment[]) {
     <div class="modal-backdrop" role="presentation">
       <div class="receipt-modal" role="dialog" aria-modal="true" aria-labelledby="receipt-title">
         <div class="modal-actions">
-          <button class="secondary" type="button" data-print-receipt>Print</button>
           <button class="secondary" type="button" data-open-printer-panel>Printer</button>
           <button class="primary" type="button" data-thermal-print>${state.printerLoading ? 'Printing...' : 'Print Receipt'}</button>
           <button class="secondary" type="button" data-close-receipt>Close</button>
@@ -904,6 +909,7 @@ function renderReceipt(order: OrderRow, payments: Payment[]) {
           <div class="receipt-payments">
             ${payments.map((payment) => `<div><span>${escapeHtml(payment.method.toUpperCase())}</span><strong>${money(payment.amount)}</strong>${payment.reference ? `<small>Ref ${escapeHtml(payment.reference)}</small>` : ''}</div>`).join('') || '<p class="helper">No payments yet.</p>'}
           </div>
+          ${state.currentUser ? `<p class="receipt-staff">Staff: ${escapeHtml(state.currentUser.name)}</p>` : ''}
         </div>
       </div>
     </div>
@@ -938,35 +944,6 @@ function renderPrinterPanel() {
       ${state.printerError ? `<p class="printer-status warn">${escapeHtml(state.printerError)}</p>` : ''}
     </div>
   `;
-}
-
-async function printCurrentReceipt() {
-  const receipt = document.querySelector<HTMLElement>('#receipt-print-area');
-  const title = document.querySelector<HTMLElement>('#receipt-title')?.textContent?.trim() || 'Laba101 receipt';
-  if (!receipt) return;
-
-  if (!Capacitor.isNativePlatform()) {
-    window.print();
-    return;
-  }
-
-  const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title><style>
-body{margin:0;background:#fff;color:#061a42;font-family:Arial,sans-serif}.receipt{width:2.2in;margin:0 auto;padding:10px;font-size:11px;line-height:1.25}.receipt-head,.receipt-customer,.summary-list div,.receipt-payments div{display:flex;justify-content:space-between;gap:10px}.receipt-head,.receipt-customer{border-bottom:1px dashed #b9c5dc;padding-bottom:10px;margin-bottom:10px}.summary-list{display:grid;gap:7px}.summary-list div,.receipt-payments div{border-bottom:1px solid #edf1fb;padding:5px 0}.receipt h3{font-size:14px;margin:10px 0 6px}.helper{color:#5c6a86}
-</style></head><body>${receipt.outerHTML}</body></html>`;
-  const fileName = `laba101-receipt-${Date.now()}.html`;
-  await Filesystem.writeFile({
-    path: fileName,
-    data: html,
-    directory: Directory.External,
-    encoding: Encoding.UTF8,
-  });
-  const { uri } = await Filesystem.getUri({ path: fileName, directory: Directory.External });
-  await Share.share({
-    title,
-    text: 'Open this receipt file and choose Print from your Android print service.',
-    files: [uri],
-    dialogTitle: 'Print receipt',
-  });
 }
 
 async function loadPairedPrinters() {
@@ -1020,7 +997,9 @@ function receiptPrintItems(order: OrderRow) {
   return [...serviceItems, ...extraItems];
 }
 
-async function thermalPrintCurrentReceipt(order: OrderRow) {
+async function thermalPrintCurrentReceipt(order: OrderRow, payments: Payment[]) {
+  const tendered = payments.reduce((sum, payment) => sum + Number(payment.amount), 0);
+  const change = Math.max(0, Number((tendered - order.totalAmount).toFixed(2)));
   state.printerLoading = true;
   state.printerError = '';
   state.printerStatus = '';
@@ -1036,8 +1015,14 @@ async function thermalPrintCurrentReceipt(order: OrderRow) {
       storeName: 'Laba101',
       receiptNumber: order.ticket,
       dateTime: formatDate(order.createdAt),
+      customerName: order.customer,
+      customerPhone: order.phone?.trim() || 'No phone',
       items: receiptPrintItems(order),
       totalAmount: order.totalAmount,
+      paidAmount: order.paidAmount,
+      changeAmount: change,
+      balanceAmount: order.balance,
+      staffName: state.currentUser?.name?.trim() || 'Staff',
     });
     state.printerStatus = 'Receipt sent to printer.';
   } catch (error) {
@@ -1586,11 +1571,6 @@ function bindNavigation() {
     state.receiptOrderId = 0;
     void render();
   });
-  document.querySelector<HTMLButtonElement>('[data-print-receipt]')?.addEventListener('click', () => {
-    void printCurrentReceipt().catch((error) => {
-      alert(error instanceof Error ? error.message : 'Receipt could not be printed.');
-    });
-  });
   document.querySelector<HTMLButtonElement>('[data-open-printer-panel]')?.addEventListener('click', () => {
     state.printerPanelOpen = !state.printerPanelOpen;
     void (state.printerPanelOpen && state.pairedPrinters.length === 0 ? loadPairedPrinters() : render());
@@ -1614,7 +1594,8 @@ function bindNavigation() {
       const data = await loadData();
       const order = data.orders.find((item) => item.id === state.receiptOrderId);
       if (!order) throw new Error('Receipt order not found.');
-      await thermalPrintCurrentReceipt(order);
+      const orderPayments = data.payments.filter((payment) => payment.orderId === order.id);
+      await thermalPrintCurrentReceipt(order, orderPayments);
     })().catch((error) => {
       state.printerPanelOpen = true;
       state.printerError = error instanceof Error ? error.message : 'Bluetooth thermal print failed.';

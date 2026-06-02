@@ -232,6 +232,12 @@ public class BluetoothThermalPrinterPlugin extends Plugin {
         String receiptNumber = call.getString("receiptNumber", "");
         String dateTime = call.getString("dateTime", new SimpleDateFormat("MMM dd, yyyy h:mm a", Locale.US).format(new Date()));
         double totalAmount = call.getDouble("totalAmount", 0.0);
+        double paidAmount = call.getDouble("paidAmount", 0.0);
+        double changeAmount = call.getDouble("changeAmount", 0.0);
+        double balanceAmount = call.getDouble("balanceAmount", totalAmount - paidAmount);
+        String customerName = call.getString("customerName", "");
+        String customerPhone = call.getString("customerPhone", "");
+        String staffName = call.getString("staffName", "");
         JSArray items = call.getArray("items", new JSArray());
 
         ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -243,6 +249,13 @@ public class BluetoothThermalPrinterPlugin extends Plugin {
         writeLine(out, "Receipt " + receiptNumber);
         writeLine(out, dateTime);
         out.write(new byte[] { 0x1B, 0x61, 0x00 });
+        writeLine(out, repeat('-', lineWidth));
+        if (customerName != null && !customerName.isEmpty()) {
+            writeLine(out, "Customer: " + customerName);
+        }
+        if (customerPhone != null && !customerPhone.isEmpty()) {
+            writeLine(out, "Phone: " + customerPhone);
+        }
         writeLine(out, repeat('-', lineWidth));
         writeLine(out, fitColumns("ITEM", "QTY", "PRICE", lineWidth));
         writeLine(out, repeat('-', lineWidth));
@@ -260,8 +273,15 @@ public class BluetoothThermalPrinterPlugin extends Plugin {
         writeLine(out, repeat('-', lineWidth));
         out.write(new byte[] { 0x1B, 0x45, 0x01 });
         writeLine(out, fitColumns("TOTAL", "", currency(totalAmount), lineWidth));
+        writeLine(out, fitColumns("PAID", "", currency(paidAmount), lineWidth));
+        writeLine(out, fitColumns("CHANGE", "", currency(changeAmount), lineWidth));
+        writeLine(out, fitColumns("BALANCE", "", currency(balanceAmount), lineWidth));
         out.write(new byte[] { 0x1B, 0x45, 0x00 });
         writeLine(out, "");
+        if (staffName != null && !staffName.isEmpty()) {
+            writeLine(out, "Staff: " + staffName);
+            writeLine(out, "");
+        }
         out.write(new byte[] { 0x1B, 0x61, 0x01 });
         writeLine(out, "Thank you!");
         writeLine(out, "");

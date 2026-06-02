@@ -1762,6 +1762,15 @@ legend {
   font-size: 0.78rem;
 }
 
+.receipt-staff {
+  margin: 12px 0 0;
+  padding-top: 10px;
+  border-top: 1px dashed #b9c5dc;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #061a42;
+}
+
 .section-divider {
   height: 1px;
   margin: 20px 0;
