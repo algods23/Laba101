@@ -1,5 +1,5 @@
 import './style.css';
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import {
@@ -60,6 +60,32 @@ if (!app) throw new Error('App root not found');
 
 let dashboardClockTimer: number | undefined;
 
+type BluetoothPrinter = {
+  name: string;
+  address: string;
+  bondState?: number;
+};
+
+type BluetoothThermalPrinterPlugin = {
+  requestBluetoothPermissions(): Promise<{ granted: boolean }>;
+  listPairedPrinters(): Promise<{ printers: BluetoothPrinter[]; savedAddress: string }>;
+  savePrinter(options: { address: string }): Promise<{ address: string }>;
+  connect(options?: { address?: string }): Promise<{ connected: boolean; address: string }>;
+  disconnect(): Promise<{ connected: boolean }>;
+  getSavedPrinter(): Promise<{ address: string; connected: boolean }>;
+  printReceipt(options: {
+    address?: string;
+    paperWidth: 58 | 80;
+    storeName: string;
+    receiptNumber: string;
+    dateTime: string;
+    items: Array<{ name: string; quantity: number; price: number }>;
+    totalAmount: number;
+  }): Promise<{ printed: boolean; address: string }>;
+};
+
+const BluetoothThermalPrinter = registerPlugin<BluetoothThermalPrinterPlugin>('BluetoothThermalPrinter');
+
 type TabKey = 'dashboard' | 'pos' | 'orders' | 'archived' | 'customers' | 'pricing' | 'disbursements' | 'reports' | 'inventory' | 'maintenance' | 'staff' | 'revolving' | 'settings';
 
 type ReportType = 'sales' | 'disbursement' | 'fold_count' | 'revolving_fund' | 'summary';
@@ -98,6 +124,13 @@ const state = {
   orderSearch: '',
   orderDateFilter: '',
   orderPaymentFilter: '',
+  printerPanelOpen: false,
+  printerLoading: false,
+  printerError: '',
+  printerStatus: '',
+  printerPaperWidth: 58 as 58 | 80,
+  pairedPrinters: [] as BluetoothPrinter[],
+  selectedPrinterAddress: '',
   archivedOrderSearch: '',
   reportPreview: null as ReportPreviewState | null,
   endorseModalOpen: false,
@@ -843,9 +876,11 @@ function renderReceipt(order: OrderRow, payments: Payment[]) {
       <div class="receipt-modal" role="dialog" aria-modal="true" aria-labelledby="receipt-title">
         <div class="modal-actions">
           <button class="secondary" type="button" data-print-receipt>Print</button>
-          <button class="secondary" type="button" data-thermal-print>Thermal</button>
+          <button class="secondary" type="button" data-open-printer-panel>Printer</button>
+          <button class="primary" type="button" data-thermal-print>${state.printerLoading ? 'Printing...' : 'Print Receipt'}</button>
           <button class="secondary" type="button" data-close-receipt>Close</button>
         </div>
+        ${state.printerPanelOpen ? renderPrinterPanel() : ''}
         <div class="receipt" id="receipt-print-area">
           <div class="receipt-head">
             <h3 id="receipt-title">Laba101</h3>
@@ -871,6 +906,36 @@ function renderReceipt(order: OrderRow, payments: Payment[]) {
           </div>
         </div>
       </div>
+    </div>
+  `;
+}
+
+function renderPrinterPanel() {
+  return `
+    <div class="printer-panel">
+      <div class="printer-panel-head">
+        <strong>Bluetooth thermal printer</strong>
+        <button class="secondary" type="button" data-refresh-printers>${state.printerLoading ? 'Scanning...' : 'Scan paired'}</button>
+      </div>
+      <div class="printer-fields">
+        <label>Printer
+          <select data-printer-select>
+            <option value="">Select paired printer</option>
+            ${state.pairedPrinters.map((printer) => `<option value="${escapeHtml(printer.address)}" ${state.selectedPrinterAddress === printer.address ? 'selected' : ''}>${escapeHtml(printer.name)} - ${escapeHtml(printer.address)}</option>`).join('')}
+          </select>
+        </label>
+        <label>Paper
+          <select data-paper-width>
+            <option value="58" ${state.printerPaperWidth === 58 ? 'selected' : ''}>58mm</option>
+            <option value="80" ${state.printerPaperWidth === 80 ? 'selected' : ''}>80mm</option>
+          </select>
+        </label>
+      </div>
+      <div class="printer-actions">
+        <button class="secondary" type="button" data-connect-printer>${state.printerLoading ? 'Connecting...' : 'Connect & Save'}</button>
+      </div>
+      ${state.printerStatus ? `<p class="printer-status ok">${escapeHtml(state.printerStatus)}</p>` : ''}
+      ${state.printerError ? `<p class="printer-status warn">${escapeHtml(state.printerError)}</p>` : ''}
     </div>
   `;
 }
@@ -904,63 +969,83 @@ body{margin:0;background:#fff;color:#061a42;font-family:Arial,sans-serif}.receip
   });
 }
 
-function receiptThermalText() {
-  const receipt = document.querySelector<HTMLElement>('#receipt-print-area');
-  if (!receipt) return 'Laba101\n';
-  const lines = Array.from(receipt.querySelectorAll<HTMLElement>('.receipt-head, .receipt-customer, .receipt-lines div, .receipt-payments div'))
-    .map((row) => row.innerText.replace(/\s+/g, ' ').trim())
-    .filter(Boolean);
-  return [
-    'LABA101',
-    '------------------------',
-    ...lines,
-    '------------------------',
-    'Thank you!',
-    '',
-    '',
-  ].join('\n');
+async function loadPairedPrinters() {
+  state.printerLoading = true;
+  state.printerError = '';
+  state.printerStatus = '';
+  await render();
+  try {
+    const permission = await BluetoothThermalPrinter.requestBluetoothPermissions();
+    if (!permission.granted) throw new Error('Bluetooth permission was not granted.');
+    const result = await BluetoothThermalPrinter.listPairedPrinters();
+    state.pairedPrinters = result.printers ?? [];
+    state.selectedPrinterAddress = state.selectedPrinterAddress || result.savedAddress || state.pairedPrinters[0]?.address || '';
+    state.printerStatus = state.pairedPrinters.length ? 'Select a printer, then connect.' : 'No paired printers found. Pair the printer in Android Bluetooth settings first.';
+  } catch (error) {
+    state.printerError = error instanceof Error ? error.message : 'Could not scan paired printers.';
+  } finally {
+    state.printerLoading = false;
+    await render();
+  }
 }
 
-async function thermalPrintCurrentReceipt() {
-  const nav = navigator as Navigator & { bluetooth?: any };
-  if (!nav.bluetooth?.requestDevice) {
-    await printCurrentReceipt();
+async function connectSelectedPrinter() {
+  if (!state.selectedPrinterAddress) {
+    state.printerError = 'Select a paired printer first.';
+    await render();
     return;
   }
-
-  const serviceUuids = [
-    '0000ffe0-0000-1000-8000-00805f9b34fb',
-    '0000ff00-0000-1000-8000-00805f9b34fb',
-    '49535343-fe7d-4ae5-8fa9-9fafd205e455',
-  ];
-  const device = await nav.bluetooth.requestDevice({
-    acceptAllDevices: true,
-    optionalServices: serviceUuids,
-  });
-  const server = await device.gatt.connect();
-  const services = await server.getPrimaryServices();
-  let writable: any = null;
-  for (const service of services) {
-    const characteristics = await service.getCharacteristics();
-    writable = characteristics.find((characteristic: any) => {
-      const props = characteristic.properties;
-      return props.write || props.writeWithoutResponse;
-    });
-    if (writable) break;
+  state.printerLoading = true;
+  state.printerError = '';
+  state.printerStatus = '';
+  await render();
+  try {
+    await BluetoothThermalPrinter.savePrinter({ address: state.selectedPrinterAddress });
+    await BluetoothThermalPrinter.connect({ address: state.selectedPrinterAddress });
+    state.printerStatus = 'Printer connected and saved.';
+  } catch (error) {
+    state.printerError = error instanceof Error ? error.message : 'Printer connection failed.';
+  } finally {
+    state.printerLoading = false;
+    await render();
   }
-  if (!writable) throw new Error('No writable Bluetooth printer channel found.');
+}
 
-  const encoder = new TextEncoder();
-  const payload = new Uint8Array([
-    0x1b, 0x40,
-    ...encoder.encode(receiptThermalText()),
-    0x1d, 0x56, 0x00,
-  ]);
-  const chunkSize = 180;
-  for (let index = 0; index < payload.length; index += chunkSize) {
-    const chunk = payload.slice(index, index + chunkSize);
-    if (writable.properties.writeWithoutResponse) await writable.writeValueWithoutResponse(chunk);
-    else await writable.writeValue(chunk);
+function receiptPrintItems(order: OrderRow) {
+  const serviceItems = (order.serviceLines?.length
+    ? order.serviceLines
+    : [{ id: order.serviceId, name: order.service, price: order.price, quantity: 1, total: order.price }])
+    .map((line) => ({ name: line.name, quantity: Number(line.quantity || 1), price: Number(line.price || 0) }));
+  const extraItems = order.extras.map((extra) => ({ name: cleanAddonName(extra.name), quantity: Number(extra.quantity ?? 1), price: Number(extra.price || 0) }));
+  return [...serviceItems, ...extraItems];
+}
+
+async function thermalPrintCurrentReceipt(order: OrderRow) {
+  state.printerLoading = true;
+  state.printerError = '';
+  state.printerStatus = '';
+  await render();
+  try {
+    if (!state.selectedPrinterAddress) {
+      const saved = await BluetoothThermalPrinter.getSavedPrinter();
+      state.selectedPrinterAddress = saved.address || '';
+    }
+    await BluetoothThermalPrinter.printReceipt({
+      address: state.selectedPrinterAddress || undefined,
+      paperWidth: state.printerPaperWidth,
+      storeName: 'Laba101',
+      receiptNumber: order.ticket,
+      dateTime: formatDate(order.createdAt),
+      items: receiptPrintItems(order),
+      totalAmount: order.totalAmount,
+    });
+    state.printerStatus = 'Receipt sent to printer.';
+  } catch (error) {
+    state.printerPanelOpen = true;
+    state.printerError = error instanceof Error ? error.message : 'Bluetooth thermal print failed.';
+  } finally {
+    state.printerLoading = false;
+    await render();
   }
 }
 
@@ -1491,6 +1576,9 @@ function bindNavigation() {
   document.querySelectorAll<HTMLElement>('[data-receipt]').forEach((button) => {
     button.addEventListener('click', () => {
       state.receiptOrderId = Number(button.dataset.receipt);
+      state.printerPanelOpen = false;
+      state.printerError = '';
+      state.printerStatus = '';
       void render();
     });
   });
@@ -1503,9 +1591,34 @@ function bindNavigation() {
       alert(error instanceof Error ? error.message : 'Receipt could not be printed.');
     });
   });
+  document.querySelector<HTMLButtonElement>('[data-open-printer-panel]')?.addEventListener('click', () => {
+    state.printerPanelOpen = !state.printerPanelOpen;
+    void (state.printerPanelOpen && state.pairedPrinters.length === 0 ? loadPairedPrinters() : render());
+  });
+  document.querySelector<HTMLButtonElement>('[data-refresh-printers]')?.addEventListener('click', () => {
+    void loadPairedPrinters();
+  });
+  document.querySelector<HTMLSelectElement>('[data-printer-select]')?.addEventListener('change', (event) => {
+    state.selectedPrinterAddress = (event.currentTarget as HTMLSelectElement).value;
+    void render();
+  });
+  document.querySelector<HTMLSelectElement>('[data-paper-width]')?.addEventListener('change', (event) => {
+    state.printerPaperWidth = Number((event.currentTarget as HTMLSelectElement).value) === 80 ? 80 : 58;
+    void render();
+  });
+  document.querySelector<HTMLButtonElement>('[data-connect-printer]')?.addEventListener('click', () => {
+    void connectSelectedPrinter();
+  });
   document.querySelector<HTMLButtonElement>('[data-thermal-print]')?.addEventListener('click', () => {
-    void thermalPrintCurrentReceipt().catch((error) => {
-      alert(error instanceof Error ? error.message : 'Bluetooth thermal print failed. Use Print instead, or install a native Bluetooth printer plugin. ' + error.message);
+    void (async () => {
+      const data = await loadData();
+      const order = data.orders.find((item) => item.id === state.receiptOrderId);
+      if (!order) throw new Error('Receipt order not found.');
+      await thermalPrintCurrentReceipt(order);
+    })().catch((error) => {
+      state.printerPanelOpen = true;
+      state.printerError = error instanceof Error ? error.message : 'Bluetooth thermal print failed.';
+      void render();
     });
   });
   document.querySelectorAll<HTMLElement>('[data-report-tab]').forEach((button) => {
