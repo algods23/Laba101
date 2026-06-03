@@ -1764,6 +1764,47 @@ legend {
 
 .orders-data-table {
   min-width: 0;
+  font-size: 0.85rem;
+}
+
+.orders-data-table th,
+.orders-data-table td {
+  padding: 10px 12px;
+}
+
+.orders-data-table .small {
+  font-size: 0.75rem;
+}
+
+.orders-data-table .row-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 140px;
+}
+
+.orders-data-table .row-actions button,
+.orders-data-table .row-actions form {
+  width: 100%;
+}
+
+.orders-data-table .row-actions button {
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: 0.8rem;
+}
+
+.orders-data-table .row-actions input,
+.orders-data-table .row-actions select {
+  min-height: 32px;
+  padding: 6px 8px;
+  font-size: 0.8rem;
+}
+
+.orders-data-table .row-actions .inline-form {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .printer-panel {
