@@ -1617,6 +1617,19 @@ legend {
   align-items: center;
 }
 
+.data-table .table-head,
+.data-table .table-row {
+  grid-template-columns: 1.5fr 1fr 0.9fr 0.8fr 1.2fr 0.8fr minmax(140px, auto);
+  min-width: 900px;
+  gap: 12px;
+}
+
+.data-table.extra-services-table .table-head,
+.data-table.extra-services-table .table-row {
+  grid-template-columns: 1.5fr 1fr 0.9fr 1.2fr 0.8fr minmax(140px, auto);
+  min-width: 800px;
+}
+
 .table-head {
   border-radius: 16px;
   background: var(--navy);

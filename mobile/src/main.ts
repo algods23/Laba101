@@ -1226,7 +1226,7 @@ function renderPricing(services: LaundryService[], categories: ItemCategory[]) {
         <div class="section-divider"></div>
         ${sectionTitle('Extra Services Table', 'Add-on services')}
         <div class="table-scroll">
-          <div class="table data-table">
+          <div class="table data-table extra-services-table">
             <div class="table-head"><div>Name</div><div>Category</div><div>Price</div><div>Includes</div><div>Status</div><div>Actions</div></div>
             ${addonServices.map((service) => `<div class="table-row"><div><strong>${escapeHtml(service.name)}</strong></div><div>${escapeHtml(service.category)}</div><div>${money(service.price)}</div><div>${escapeHtml(service.includes.join(', ') || 'none')}</div><div>${service.isActive ? 'Active' : 'Inactive'}</div><div class="row-actions"><button class="secondary edit-service-btn" data-id="${service.id}">Edit</button>${service.isActive ? `<button class="secondary deactivate-service-btn" data-id="${service.id}">Deactivate</button>` : `<button class="secondary activate-service-btn" data-id="${service.id}">Activate</button>`}</div></div>`).join('') || '<div class="helper">No extra services yet.</div>'}
           </div>
