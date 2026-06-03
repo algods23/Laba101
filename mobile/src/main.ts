@@ -1345,21 +1345,13 @@ function renderReports(orders: OrderRow[], payments: Payment[], sales: DailySale
               <div class="table-head report-table-head"><div>Ticket</div><div>Customer</div><div>Cash</div><div>GCash</div><div>Total Payment</div></div>
               ${preview.salesRows().transactions.map((tx) => `<div class="table-row report-table-row"><div>${escapeHtml(tx.ticket)}</div><div>${escapeHtml(tx.customer)}</div><div>${money(tx.cash)}</div><div>${money(tx.gcash)}</div><div>${money(tx.total)}</div></div>`).join('')}
             </div>
-            <div class="sales-summary-table">
-              <div class="summary-row">
-                <div class="summary-cell"><span class="summary-label">Cash from Orders</span><strong>${money(preview.salesRows().orderCashTotal)}</strong></div>
-                <div class="summary-cell"><span class="summary-label">GCash from Orders</span><strong>${money(preview.salesRows().orderGcashTotal)}</strong></div>
-                <div class="summary-cell"><span class="summary-label">Sales from Orders</span><strong>${money(preview.salesRows().orderCashTotal + preview.salesRows().orderGcashTotal)}</strong></div>
-              </div>
-              <div class="summary-row">
-                <div class="summary-cell"><span class="summary-label">Cash Whole Sale</span><strong>${money(preview.salesRows().manualCashTotal)}</strong></div>
-                <div class="summary-cell"><span class="summary-label">GCash Whole Sale</span><strong>${money(preview.salesRows().manualGcashTotal)}</strong></div>
-                <div class="summary-cell"><span class="summary-label">Whole Sale of Day</span><strong>${money(preview.salesRows().manualCashTotal + preview.salesRows().manualGcashTotal)}</strong></div>
-              </div>
-              <div class="summary-row total-row">
-                <div class="summary-cell"><span class="summary-label">Total Cash</span><strong>${money(preview.salesRows().totalCash)}</strong></div>
-                <div class="summary-cell"><span class="summary-label">Total GCash</span><strong>${money(preview.salesRows().totalGcash)}</strong></div>
-                <div class="summary-cell"><span class="summary-label">Total Sales</span><strong>${money(preview.salesRows().totalSales)}</strong></div>
+            <div class="sales-summary-section">
+              <h3>Sales Summary</h3>
+              <div class="table sales-summary-table">
+                <div class="table-head"><div>Sales Type</div><div>Cash</div><div>GCash</div><div>Sales</div></div>
+                <div class="table-row"><div>Orders</div><div>${money(preview.salesRows().orderCashTotal)}</div><div>${money(preview.salesRows().orderGcashTotal)}</div><div>${money(preview.salesRows().orderCashTotal + preview.salesRows().orderGcashTotal)}</div></div>
+                <div class="table-row"><div>Whole Sale Day</div><div>${money(preview.salesRows().manualCashTotal)}</div><div>${money(preview.salesRows().manualGcashTotal)}</div><div>${money(preview.salesRows().manualCashTotal + preview.salesRows().manualGcashTotal)}</div></div>
+                <div class="table-row total-row"><div>Total</div><div>${money(preview.salesRows().totalCash)}</div><div>${money(preview.salesRows().totalGcash)}</div><div>${money(preview.salesRows().totalSales)}</div></div>
               </div>
             </div>
           </article>` : ''}
@@ -1367,9 +1359,11 @@ function renderReports(orders: OrderRow[], payments: Payment[], sales: DailySale
           <article>
             ${sectionTitle('Disbursement preview', `${preview.selection.from} to ${preview.selection.to}`)}
             <div class="table wide-table report-preview-table report-disbursement-table">
-              <div class="table-head report-table-head"><div>ID#</div><div>Name</div><div>Category</div><div>Amount</div><div>Date</div></div>
-              ${preview.disbursementRows().rows.slice(1).filter((row) => row.length && row[0] !== 'Total Disbursement').map((row) => `<div class="table-row report-table-row"><div>${escapeHtml(row[1] ?? '')}</div><div>${escapeHtml(row[2] ?? '')}</div><div>${escapeHtml(row[3] ?? '')}</div><div>${money(row[5] as number)}</div><div>${escapeHtml(row[0] ?? '')}</div></div>`).join('')}
-              <div class="table-row report-table-row total-row"><div></div><div></div><div>Total Disbursement</div><div>${money(preview.disbursementRows().totalDisbursement)}</div><div></div></div>
+              <div class="table-head report-table-head"><div>ID#</div><div>Date</div><div>Name</div><div>Category</div><div>Amount</div></div>
+              ${preview.disbursementRows().rows.slice(1).filter((row) => row.length && row[0] !== 'Total Disbursement').map((row) => `<div class="table-row report-table-row"><div>${escapeHtml(row[1] ?? '')}</div><div>${escapeHtml(row[0] ?? '')}</div><div>${escapeHtml(row[2] ?? '')}</div><div>${escapeHtml(row[3] ?? '')}</div><div>${money(row[5] as number)}</div></div>`).join('')}
+            </div>
+            <div class="disbursement-total">
+              <strong>Total Disbursement: ${money(preview.disbursementRows().totalDisbursement)}</strong>
             </div>
           </article>` : ''}
         ${preview.selectedTypes.has('fold_count') ? `
