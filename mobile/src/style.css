@@ -444,7 +444,7 @@ button {
 
 .dashboard-main {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 400px;
+  grid-template-columns: minmax(0, 1fr);
   gap: 28px;
 }
 
@@ -513,6 +513,26 @@ button {
   font-size: 1.5rem;
 }
 
+.dashboard-stats {
+  grid-template-columns: minmax(180px, 1.3fr) minmax(150px, 1fr) minmax(150px, 1fr);
+  gap: 12px;
+}
+
+.dashboard-stats .stat {
+  min-height: 112px;
+  padding: 16px;
+}
+
+.stat-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
 .report-stats {
   grid-template-columns: repeat(4, minmax(130px, 1fr));
 }
@@ -541,7 +561,7 @@ button {
 
 .mini-chart.revenue-chart {
   width: 100%;
-  min-width: 100%;
+  min-width: 560px;
   height: 300px;
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
@@ -577,7 +597,7 @@ button {
   display: block;
   max-width: 100%;
   color: var(--navy);
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   line-height: 1.25;
   text-align: center;
   white-space: normal;
@@ -590,6 +610,7 @@ button {
   gap: 8px;
   color: var(--muted);
   font-size: 0.78rem;
+  min-width: 560px;
   padding-top: 10px;
 }
 
@@ -630,8 +651,18 @@ button {
 
 .report-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 420px;
-  gap: 30px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+}
+
+.report-date-row,
+.report-scope-row,
+.report-include-row {
+  min-width: 0;
+}
+
+.report-date-inputs {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .report-preview {
@@ -894,21 +925,22 @@ button {
 .date-scopes {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 22px;
+  gap: 8px;
+  margin-bottom: 0;
 }
 
 .date-scopes label,
 .report-checks label {
-  min-height: 58px;
+  min-height: 44px;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: 12px;
   background: #f8fbff;
   color: var(--navy);
-  padding: 0 16px;
+  padding: 0 10px;
+  font-size: 0.78rem;
   font-weight: 900;
 }
 
@@ -923,12 +955,13 @@ button {
 
 .report-checks {
   display: grid;
-  gap: 14px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
 }
 
 .report-checks input {
-  width: 22px;
-  min-height: 22px;
+  width: 18px;
+  min-height: 18px;
 }
 
 .report-actions {
@@ -1441,6 +1474,7 @@ legend {
 
 .daily-report-table .table-head,
 .daily-report-table .table-row {
+  min-width: 760px;
   grid-template-columns: 1fr 0.9fr 1fr 1fr 0.9fr minmax(132px, auto);
 }
 
@@ -2041,10 +2075,35 @@ legend {
     grid-template-columns: 1fr;
   }
 
+  .dashboard-stats {
+    display: grid;
+    grid-template-columns: minmax(190px, 1.25fr) minmax(150px, 1fr) minmax(150px, 1fr);
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+
+  .dashboard-stats .stat {
+    min-width: 0;
+    min-height: 100px;
+    padding: 14px;
+  }
+
+  .dashboard-stats .value {
+    font-size: 1.32rem;
+  }
+
+  .stat-breakdown {
+    font-size: 0.72rem;
+  }
+
   .report-stats {
     display: grid;
     grid-template-columns: repeat(4, minmax(112px, 1fr));
     overflow-x: auto;
+  }
+
+  .report-date-inputs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .modal-backdrop {
@@ -2069,6 +2128,14 @@ legend {
   .table-row {
     grid-template-columns: 1fr;
     gap: 12px;
+  }
+
+  .daily-report-table .table-head {
+    display: grid;
+  }
+
+  .daily-report-table .table-row {
+    grid-template-columns: 1fr 0.9fr 1fr 1fr 0.9fr minmax(132px, auto);
   }
 
   .revolving-data-table .table-head,
@@ -2127,7 +2194,19 @@ legend {
   }
 
   .date-scopes {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(74px, 1fr));
+  }
+
+  .report-checks {
+    grid-template-columns: repeat(5, minmax(96px, 1fr));
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .report-checks label {
+    min-height: 40px;
+    font-size: 0.7rem;
+    white-space: nowrap;
   }
 
   .report-actions > div {
@@ -2144,18 +2223,24 @@ legend {
   }
 
   .mini-chart.revenue-chart {
-    height: 180px;
-    gap: 6px;
+    min-width: 640px;
+    height: 230px;
+    gap: 10px;
   }
 
   .chart-bar span {
-    max-width: 20px;
-    min-width: 8px;
+    max-width: 24px;
+    min-width: 12px;
   }
 
   .chart-days {
-    gap: 6px;
-    font-size: 0.7rem;
+    min-width: 640px;
+    gap: 10px;
+    font-size: 0.72rem;
+  }
+
+  .chart-bar strong {
+    font-size: 0.66rem;
   }
 
   .report-preview .table-head,

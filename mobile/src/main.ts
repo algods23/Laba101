@@ -280,17 +280,26 @@ function reportSelectionInRange(date: string, selection: { from: string; to: str
   return date >= selection.from && date <= selection.to;
 }
 
-function buildReportData(orders: OrderRow[], sales: DailySale[], expenses: DisbursementExpense[], revolvingHistory: RevolvingHistory[], foldRate: number, selection: { from: string; to: string; types: ReportType[] }) {
+function buildReportData(orders: OrderRow[], payments: Payment[], sales: DailySale[], expenses: DisbursementExpense[], revolvingHistory: RevolvingHistory[], foldRate: number, selection: { from: string; to: string; types: ReportType[] }) {
   const selectedTypes = new Set(selection.types);
   const salesOrders = orders.filter((order) => reportSelectionInRange(localDateFromIso(order.createdAt), selection));
   const manualSales = sales.filter((sale) => reportSelectionInRange(sale.saleDate, selection));
   const filteredExpenses = expenses.filter((expense) => reportSelectionInRange(expense.expenseDate, selection));
   const filteredFoldCounts = foldCountRowsFromOrders(salesOrders);
+  const paymentsByOrder = new Map<number, { cash: number; gcash: number }>();
+  payments
+    .filter((payment) => reportSelectionInRange(localDateFromIso(payment.receivedAt), selection))
+    .forEach((payment) => {
+      const current = paymentsByOrder.get(payment.orderId) ?? { cash: 0, gcash: 0 };
+      if (payment.method === 'gcash') current.gcash += payment.amount;
+      else current.cash += payment.amount;
+      paymentsByOrder.set(payment.orderId, current);
+  });
 
-  const orderCashTotal = salesOrders.reduce((sum, order) => sum + order.paidAmount, 0);
+  const orderCashTotal = salesOrders.reduce((sum, order) => sum + (paymentsByOrder.get(order.id)?.cash ?? order.paidAmount), 0);
   const manualCashTotal = manualSales.reduce((sum, sale) => sum + sale.cashAmount, 0);
   const manualGcashTotal = manualSales.reduce((sum, sale) => sum + sale.gcashAmount, 0);
-  const orderGcashTotal = 0;
+  const orderGcashTotal = salesOrders.reduce((sum, order) => sum + (paymentsByOrder.get(order.id)?.gcash ?? 0), 0);
   const totalCash = orderCashTotal + manualCashTotal;
   const totalGcash = orderGcashTotal + manualGcashTotal;
   const totalSales = totalCash + totalGcash;
@@ -308,7 +317,10 @@ function buildReportData(orders: OrderRow[], sales: DailySale[], expenses: Disbu
     totalSales,
     rows: [
       ['Type', 'Date', 'Number', 'Name', 'Cash', 'GCash', 'Total', 'Balance'],
-      ...salesOrders.map((order) => ['Order', localDateFromIso(order.createdAt), order.ticket, order.customer, order.paidAmount, 0, order.paidAmount, order.balance]),
+      ...salesOrders.map((order) => {
+        const payment = paymentsByOrder.get(order.id) ?? { cash: order.paidAmount, gcash: 0 };
+        return ['Order', localDateFromIso(order.createdAt), order.ticket, order.customer, payment.cash, payment.gcash, payment.cash + payment.gcash, order.balance];
+      }),
       ...manualSales.map((sale) => ['Manual Sale', sale.saleDate, sale.saleNumber, sale.notes ?? '', sale.cashAmount, sale.gcashAmount, sale.totalAmount, '']),
       [],
       ['Sales Summary', selection.from, 'to', selection.to, '', '', '', ''],
@@ -479,12 +491,15 @@ async function render() {
   const readyPickup = data.orders.filter((order) => order.status === 'ready').length;
   const orderSales = data.orders.reduce((sum, order) => sum + order.paidAmount, 0);
   const todayValue = today();
-  const paidToday = data.orders.filter((order) => localDateFromIso(order.createdAt) === todayValue).reduce((sum, order) => sum + order.paidAmount, 0)
-    + data.sales.filter((sale) => sale.saleDate === todayValue).reduce((sum, sale) => sum + sale.totalAmount, 0);
+  const gcashPaidToday = data.payments
+    .filter((payment) => payment.branch === data.branch && payment.method === 'gcash' && localDateFromIso(payment.receivedAt) === todayValue)
+    .reduce((sum, payment) => sum + payment.amount, 0)
+    + data.sales.filter((sale) => sale.saleDate === todayValue).reduce((sum, sale) => sum + sale.gcashAmount, 0);
   const cashPaidToday = data.payments
     .filter((payment) => payment.branch === data.branch && payment.method === 'cash' && localDateFromIso(payment.receivedAt) === todayValue)
     .reduce((sum, payment) => sum + payment.amount, 0)
     + data.sales.filter((sale) => sale.saleDate === todayValue).reduce((sum, sale) => sum + sale.cashAmount, 0);
+  const paidToday = cashPaidToday + gcashPaidToday;
   const disbursementToday = data.expenses.filter((expense) => expense.expenseDate === todayValue).reduce((sum, expense) => sum + expense.amount, 0);
   const cashOnHandToday = computeCashOnHand(cashPaidToday, disbursementToday);
   const manualSales = data.sales.reduce((sum, sale) => sum + sale.totalAmount, 0);
@@ -553,14 +568,14 @@ async function render() {
           <button class="mobile-avatar" type="button">${initials(state.currentUser)}</button>
         </header>
 
-        ${state.tab === 'dashboard' ? renderDashboard({ paidToday, cashPaidToday, disbursementToday, cashOnHandToday, orders: data.orders, payments: data.payments, sales: data.sales }) : ''}
+        ${state.tab === 'dashboard' ? renderDashboard({ paidToday, cashPaidToday, gcashPaidToday, disbursementToday, cashOnHandToday, orders: data.orders, payments: data.payments, sales: data.sales }) : ''}
         ${state.tab === 'pos' ? renderPos(data.orders, data.customers, data.services, data.categories, data.payments, data.branch) : ''}
         ${state.tab === 'orders' ? renderOrders(data.orders, data.staff, data.services, data.payments) : ''}
         ${state.tab === 'archived' ? renderArchivedOrders(data.orders, data.staff, data.services, data.payments) : ''}
         ${state.tab === 'customers' ? renderCustomers(data.customers, data.orders) : ''}
         ${state.tab === 'pricing' ? renderPricing(data.allServices, data.categories) : ''}
         ${state.tab === 'disbursements' ? renderDisbursements(data.expenses, data.sales) : ''}
-        ${state.tab === 'reports' ? renderReports(data.orders, data.sales, data.expenses, data.revolvingHistory, data.foldRate, salesTotal, disbursementTotal, profit) : ''}
+        ${state.tab === 'reports' ? renderReports(data.orders, data.payments, data.sales, data.expenses, data.revolvingHistory, data.foldRate, salesTotal, disbursementTotal, profit) : ''}
         ${state.tab === 'inventory' ? renderInventory(data.services, data.categories) : ''}
         ${state.tab === 'maintenance' ? renderMaintenance(data.machines, data.subcleanings, data.branch) : ''}
         ${state.tab === 'staff' ? renderStaff(data.allStaff, data.branch) : ''}
@@ -574,7 +589,7 @@ async function render() {
   bindOrderForms(data);
   bindPricingForms(data.allServices);
   bindDisbursementForms(data.expenses);
-  bindReportActions(data.orders, data.sales, data.expenses, data.revolvingHistory, data.foldRate);
+  bindReportActions(data.orders, data.payments, data.sales, data.expenses, data.revolvingHistory, data.foldRate);
   bindOrderFilters();
   bindCustomerSearch();
   bindMaintenanceForms();
@@ -626,7 +641,7 @@ function bindLoginShortcuts() {
   });
 }
 
-function renderDashboard(metrics: { paidToday: number; cashPaidToday: number; disbursementToday: number; cashOnHandToday: number; orders: OrderRow[]; payments: Payment[]; sales: DailySale[] }) {
+function renderDashboard(metrics: { paidToday: number; cashPaidToday: number; gcashPaidToday: number; disbursementToday: number; cashOnHandToday: number; orders: OrderRow[]; payments: Payment[]; sales: DailySale[] }) {
   const now = new Date();
   const chartDays = Array.from({ length: 7 }, (_, index) => {
     const date = new Date(now);
@@ -652,8 +667,11 @@ function renderDashboard(metrics: { paidToday: number; cashPaidToday: number; di
       <article class="panel revenue-panel">
         ${sectionTitle('Revenue overview', 'Paid amount for the last 7 days.')}
         <div class="stats compact dashboard-stats">
-          <div class="stat"><span class="card-label">Paid Today</span><div class="value">${money(metrics.paidToday)}</div></div>
-          <div class="stat"><span class="card-label">Cash Today</span><div class="value">${money(metrics.cashPaidToday)}</div></div>
+          <div class="stat paid-today-stat">
+            <span class="card-label">Paid Today</span>
+            <div class="value">${money(metrics.paidToday)}</div>
+            <div class="stat-breakdown"><span>Cash ${money(metrics.cashPaidToday)}</span><span>GCash ${money(metrics.gcashPaidToday)}</span></div>
+          </div>
           <div class="stat"><span class="card-label">Disbursement</span><div class="value">${money(metrics.disbursementToday)}</div></div>
           <div class="stat"><span class="card-label">Cash on Hand</span><div class="value">${money(metrics.cashOnHandToday)}</div></div>
         </div>
@@ -1238,9 +1256,11 @@ function renderDisbursements(expenses: DisbursementExpense[], sales: DailySale[]
       </article>
       <article class="panel">
         ${sectionTitle('Disbursement list', 'Expenses only')}
-        <div class="table">
-          <div class="table-head"><div>Date</div><div>No.</div><div>Name</div><div>Category</div><div>Amount</div><div>Action</div></div>
-          ${expenses.map((item) => `<div class="table-row"><div>${escapeHtml(item.expenseDate)}</div><div>${escapeHtml(item.number)}</div><div>${escapeHtml(item.name)}</div><div>${escapeHtml(item.category)}</div><div>${money(item.amount)}</div><div class="row-actions"><button class="secondary edit-expense-btn" data-id="${item.id}" type="button">Edit</button>${isAdmin ? `<button class="secondary delete-expense-btn" data-id="${item.id}" type="button">Delete</button>` : ''}</div></div>`).join('') || '<div class="helper">No expenses yet.</div>'}
+        <div class="table-scroll daily-report-scroll">
+          <div class="table daily-report-table">
+            <div class="table-head"><div>Date</div><div>No.</div><div>Name</div><div>Category</div><div>Amount</div><div>Action</div></div>
+            ${expenses.map((item) => `<div class="table-row"><div>${escapeHtml(item.expenseDate)}</div><div>${escapeHtml(item.number)}</div><div>${escapeHtml(item.name)}</div><div>${escapeHtml(item.category)}</div><div>${money(item.amount)}</div><div class="row-actions"><button class="secondary edit-expense-btn" data-id="${item.id}" type="button">Edit</button>${isAdmin ? `<button class="secondary delete-expense-btn" data-id="${item.id}" type="button">Delete</button>` : ''}</div></div>`).join('') || '<div class="helper">No expenses yet.</div>'}
+          </div>
         </div>
       </article>
     </section>
@@ -1259,9 +1279,11 @@ function renderDisbursements(expenses: DisbursementExpense[], sales: DailySale[]
       </article>
       <article class="panel">
         ${sectionTitle('Daily sales history', 'Cash, GCash, total sale, notes, and updates')}
-        <div class="table wide-table daily-report-table">
-          <div class="table-head"><div>Sales #</div><div>Date</div><div>Cash</div><div>GCash</div><div>Total sale</div><div>Action</div></div>
-          ${sales.map((item) => `<div class="table-row"><div>${escapeHtml(item.saleNumber)}</div><div>${escapeHtml(item.saleDate)}</div><div>${money(item.cashAmount)}</div><div>${money(item.gcashAmount)}</div><div><strong>${money(item.totalAmount)}</strong></div><div class="row-actions"><button class="secondary edit-sale-btn" data-id="${item.id}" type="button">Edit</button>${isAdmin ? `<button class="secondary delete-sale-btn" data-id="${item.id}" type="button">Delete</button>` : ''}</div></div>`).join('') || '<div class="helper">No daily sales totals yet.</div>'}
+        <div class="table-scroll daily-report-scroll">
+          <div class="table wide-table daily-report-table">
+            <div class="table-head"><div>Sales #</div><div>Date</div><div>Cash</div><div>GCash</div><div>Total sale</div><div>Action</div></div>
+            ${sales.map((item) => `<div class="table-row"><div>${escapeHtml(item.saleNumber)}</div><div>${escapeHtml(item.saleDate)}</div><div>${money(item.cashAmount)}</div><div>${money(item.gcashAmount)}</div><div><strong>${money(item.totalAmount)}</strong></div><div class="row-actions"><button class="secondary edit-sale-btn" data-id="${item.id}" type="button">Edit</button>${isAdmin ? `<button class="secondary delete-sale-btn" data-id="${item.id}" type="button">Delete</button>` : ''}</div></div>`).join('') || '<div class="helper">No daily sales totals yet.</div>'}
+          </div>
         </div>
       </article>
     </section>
@@ -1269,8 +1291,13 @@ function renderDisbursements(expenses: DisbursementExpense[], sales: DailySale[]
   `;
 }
 
-function renderReports(orders: OrderRow[], sales: DailySale[], expenses: DisbursementExpense[], revolvingHistory: RevolvingHistory[], foldRate: number, salesTotal: number, disbursementTotal: number, profit: number) {
-  const preview = state.reportPreview ? buildReportData(orders, sales, expenses, revolvingHistory, foldRate, state.reportPreview) : null;
+function reportPreviewCell(value: string | number, index: number) {
+  if (typeof value === 'number' && index >= 4) return money(value);
+  return escapeHtml(value ?? '');
+}
+
+function renderReports(orders: OrderRow[], payments: Payment[], sales: DailySale[], expenses: DisbursementExpense[], revolvingHistory: RevolvingHistory[], foldRate: number, salesTotal: number, disbursementTotal: number, profit: number) {
+  const preview = state.reportPreview ? buildReportData(orders, payments, sales, expenses, revolvingHistory, foldRate, state.reportPreview) : null;
   return `
     <section class="page-head">
       <div>
@@ -1280,24 +1307,26 @@ function renderReports(orders: OrderRow[], sales: DailySale[], expenses: Disburs
     </section>
     <section class="panel report-center">
       <div class="report-grid">
-        <div>
+        <div class="report-date-row">
           <h3>Date to export</h3>
+          <div class="form-row report-date-inputs">
+            <label>From<input name="dateFrom" data-date-from type="date" value="${today()}" /></label>
+            <label>To<input name="dateTo" data-date-to type="date" value="${today()}" /></label>
+          </div>
+        </div>
+        <div class="report-scope-row">
           <div class="date-scopes">
             <label><input type="radio" name="dateScope" value="today" data-date-scope checked /> <span>Current</span></label>
             <label><input type="radio" name="dateScope" value="week" data-date-scope /> <span>Week</span></label>
             <label><input type="radio" name="dateScope" value="month" data-date-scope /> <span>Month</span></label>
             <label><input type="radio" name="dateScope" value="custom" data-date-scope /> <span>Custom</span></label>
           </div>
-          <div class="form-row">
-            <label>From<input name="dateFrom" data-date-from type="date" value="${today()}" /></label>
-            <label>To<input name="dateTo" data-date-to type="date" value="${today()}" /></label>
-          </div>
         </div>
-        <div>
+        <div class="report-include-row">
           <h3>Reports to include</h3>
           <div class="report-checks">
-            <label><input type="checkbox" name="reportType" value="sales" checked /> Sales reports</label>
-            <label><input type="checkbox" name="reportType" value="disbursement" checked /> Disbursement reports</label>
+            <label><input type="checkbox" name="reportType" value="sales" checked /> Sales Report</label>
+            <label><input type="checkbox" name="reportType" value="disbursement" checked /> Disbursement Reports</label>
             <label><input type="checkbox" name="reportType" value="fold_count" /> Fold Count</label>
             <label><input type="checkbox" name="reportType" value="revolving_fund" /> Revolving Fund</label>
             <label><input type="checkbox" name="reportType" value="summary" checked /> Summary</label>
@@ -1320,7 +1349,7 @@ function renderReports(orders: OrderRow[], sales: DailySale[], expenses: Disburs
             ${sectionTitle('Sales report preview', `${preview.selection.from} to ${preview.selection.to}`)}
             <div class="table wide-table report-preview-table">
               <div class="table-head report-table-head"><div>Type</div><div>Date</div><div>Number</div><div>Name</div><div>Cash</div><div>GCash</div><div>Total</div><div>Balance</div></div>
-              ${preview.salesRows().rows.slice(1).map((row) => `<div class="table-row report-table-row">${row.map((value) => `<div>${escapeHtml(value ?? '')}</div>`).join('')}</div>`).join('')}
+              ${preview.salesRows().rows.slice(1).filter((row) => row.length).map((row) => `<div class="table-row report-table-row">${row.map((value, index) => `<div>${reportPreviewCell(value, index)}</div>`).join('')}</div>`).join('')}
             </div>
           </article>` : ''}
         ${preview.selectedTypes.has('disbursement') ? `
@@ -2059,7 +2088,7 @@ function bindDisbursementForms(expenses: DisbursementExpense[]) {
   });
 }
 
-function bindReportActions(orders: OrderRow[], sales: DailySale[], expenses: DisbursementExpense[], revolvingHistory: RevolvingHistory[], foldRate: number) {
+function bindReportActions(orders: OrderRow[], payments: Payment[], sales: DailySale[], expenses: DisbursementExpense[], revolvingHistory: RevolvingHistory[], foldRate: number) {
   document.querySelector<HTMLButtonElement>('#generate-report')?.addEventListener('click', () => {
     state.reportPreview = currentReportSelection();
     void render();
@@ -2215,7 +2244,7 @@ function bindReportActions(orders: OrderRow[], sales: DailySale[], expenses: Dis
   };
   const reportFile = () => {
     const selection = currentReportSelection();
-    const report = buildReportData(orders, sales, expenses, revolvingHistory, foldRate, selection);
+    const report = buildReportData(orders, payments, sales, expenses, revolvingHistory, foldRate, selection);
     const sheets: Array<{ name: string; rows: Array<Array<string | number>> }> = [];
     if (report.selectedTypes.has('sales')) sheets.push({ name: 'Sales Report', rows: report.salesRows().rows });
     if (report.selectedTypes.has('disbursement')) sheets.push({ name: 'Disbursement', rows: report.disbursementRows().rows });
