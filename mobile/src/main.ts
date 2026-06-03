@@ -296,10 +296,32 @@ function buildReportData(orders: OrderRow[], payments: Payment[], sales: DailySa
       paymentsByOrder.set(payment.orderId, current);
   });
 
-  const orderCashTotal = salesOrders.reduce((sum, order) => sum + (paymentsByOrder.get(order.id)?.cash ?? order.paidAmount), 0);
+  const orderCashTotal = salesOrders.reduce((sum, order) => {
+    const payment = paymentsByOrder.get(order.id);
+    if (payment) {
+      const totalPayment = payment.cash + payment.gcash;
+      if (totalPayment > order.totalAmount) {
+        const ratio = order.totalAmount / totalPayment;
+        return sum + (payment.cash * ratio);
+      }
+      return sum + payment.cash;
+    }
+    return sum + order.paidAmount;
+  }, 0);
   const manualCashTotal = manualSales.reduce((sum, sale) => sum + sale.cashAmount, 0);
   const manualGcashTotal = manualSales.reduce((sum, sale) => sum + sale.gcashAmount, 0);
-  const orderGcashTotal = salesOrders.reduce((sum, order) => sum + (paymentsByOrder.get(order.id)?.gcash ?? 0), 0);
+  const orderGcashTotal = salesOrders.reduce((sum, order) => {
+    const payment = paymentsByOrder.get(order.id);
+    if (payment) {
+      const totalPayment = payment.cash + payment.gcash;
+      if (totalPayment > order.totalAmount) {
+        const ratio = order.totalAmount / totalPayment;
+        return sum + (payment.gcash * ratio);
+      }
+      return sum + payment.gcash;
+    }
+    return sum + 0;
+  }, 0);
   const totalCash = orderCashTotal + manualCashTotal;
   const totalGcash = orderGcashTotal + manualGcashTotal;
   const totalSales = totalCash + totalGcash;
@@ -317,12 +339,22 @@ function buildReportData(orders: OrderRow[], payments: Payment[], sales: DailySa
     totalSales,
     transactions: salesOrders.map((order) => {
       const payment = paymentsByOrder.get(order.id) ?? { cash: order.paidAmount, gcash: 0 };
+      const totalPayment = payment.cash + payment.gcash;
+      let cash = payment.cash;
+      let gcash = payment.gcash;
+      let total = totalPayment;
+      if (totalPayment > order.totalAmount) {
+        const ratio = order.totalAmount / totalPayment;
+        cash = payment.cash * ratio;
+        gcash = payment.gcash * ratio;
+        total = order.totalAmount;
+      }
       return {
         ticket: order.ticket,
         customer: order.customer,
-        cash: payment.cash,
-        gcash: payment.gcash,
-        total: payment.cash + payment.gcash,
+        cash,
+        gcash,
+        total,
       };
     }),
     manualSales: manualSales.map((sale) => ({
