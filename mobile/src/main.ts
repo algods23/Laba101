@@ -1341,7 +1341,7 @@ function renderReports(orders: OrderRow[], payments: Payment[], sales: DailySale
         ${preview.selectedTypes.has('sales') ? `
           <article>
             ${sectionTitle('Sales report preview', `${preview.selection.from} to ${preview.selection.to}`)}
-            <div class="table wide-table report-preview-table">
+            <div class="table wide-table report-preview-table sales-table">
               <div class="table-head report-table-head"><div>Ticket</div><div>Customer</div><div>Cash</div><div>GCash</div><div>Total Payment</div></div>
               ${preview.salesRows().transactions.map((tx) => `<div class="table-row report-table-row"><div>${escapeHtml(tx.ticket)}</div><div>${escapeHtml(tx.customer)}</div><div>${money(tx.cash)}</div><div>${money(tx.gcash)}</div><div>${money(tx.total)}</div></div>`).join('')}
             </div>
@@ -1407,12 +1407,9 @@ function renderReports(orders: OrderRow[], payments: Payment[], sales: DailySale
         ${preview.selectedTypes.has('summary') ? `
           <article>
             ${sectionTitle('Summary preview', `${preview.selection.from} to ${preview.selection.to}`)}
-            <div class="summary-cards-grid">
-              <div class="summary-card"><span class="card-label">Total Cash</span><strong>${money(preview.salesRows().totalCash)}</strong></div>
-              <div class="summary-card"><span class="card-label">Total GCash</span><strong>${money(preview.salesRows().totalGcash)}</strong></div>
-              <div class="summary-card"><span class="card-label">Total Sales</span><strong>${money(preview.salesRows().totalSales)}</strong></div>
+            <div class="summary-cards-grid summary-single-row">
+              <div class="summary-card"><span class="card-label">Total Sales</span><div class="card-details"><span>Total Cash: ${money(preview.salesRows().totalCash)}</span><span>Total GCash: ${money(preview.salesRows().totalGcash)}</span></div><strong>${money(preview.salesRows().totalSales)}</strong></div>
               <div class="summary-card"><span class="card-label">Total Disbursement</span><strong>${money(preview.disbursementRows().totalDisbursement)}</strong></div>
-              <div class="summary-card"><span class="card-label">Total Profit</span><strong>${money(preview.profit)}</strong></div>
               <div class="summary-card"><span class="card-label">Cash on Hand</span><strong>${money(computeCashOnHand(preview.salesRows().totalCash, preview.disbursementRows().totalDisbursement))}</strong></div>
             </div>
           </article>` : ''}
