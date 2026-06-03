@@ -235,7 +235,7 @@
                                     <td class="px-3 py-4">
                                         <div class="flex flex-col gap-2">
                                             <div>
-                                                <p class="font-bold {{ $order->balance > 0 ? 'text-[#9b3d24]' : 'text-[#08285f]' }}">PHP {{ number_format($order->balance, 2) }}</p>
+                                                <p class="font-bold {{ $order->balance > 0 ? 'text-[#9b3d24]' : 'text-[#08285f]' }}">PHP ***</p>
                                                 <p class="mt-1 text-xs text-[#5c6a86]">Paid PHP {{ number_format($order->paid_amount, 2) }}</p>
                                                 @if ($order->payments->isNotEmpty())
                                                     <div class="mt-2 space-y-1">
@@ -260,7 +260,7 @@
                                             @endif
                                         </div>
                                     </td>
-                                    <td class="px-3 py-4" x-data="{ showPayment: false, paymentMethod: 'cash' }">
+                                    <td class="px-3 py-4" x-data="{ showPayment: false, showConfirm: false, paymentMethod: 'cash' }">
                                         <div class="flex flex-col gap-2">
                                             @if ($order->balance > 0)
                                                 <button
@@ -282,13 +282,14 @@
                                                         action="{{ route('orders.pay', $order) }}"
                                                         x-on:click.outside="showPayment = false"
                                                         class="w-full max-w-md rounded-3xl border border-white/70 bg-white p-5 text-sm text-[#061a42] shadow-2xl"
+                                                        @submit.prevent="showConfirm = true"
                                                     >
                                                         @csrf
                                                         @method('PATCH')
                                                         <div class="flex items-start justify-between gap-4">
                                                             <div>
                                                                 <p class="text-lg font-extrabold text-[#061a42]">Make a payment</p>
-                                                                <p class="mt-1 text-xs font-semibold text-[#5c6a86]">{{ $order->order_number }} / Balance PHP {{ number_format($order->balance, 2) }}</p>
+                                                                <p class="mt-1 text-xs font-semibold text-[#5c6a86]">{{ $order->order_number }}</p>
                                                             </div>
                                                             <button
                                                                 type="button"
@@ -356,6 +357,56 @@
                                                             </button>
                                                         </div>
                                                     </form>
+                                                </div>
+                                                <div
+                                                    x-cloak
+                                                    x-show="showConfirm"
+                                                    x-transition.opacity
+                                                    x-on:keydown.escape.window="showConfirm = false"
+                                                    class="fixed inset-0 z-[60] flex items-center justify-center bg-[#031336]/65 p-4 backdrop-blur-sm"
+                                                >
+                                                    <div
+                                                        x-on:click.outside="showConfirm = false"
+                                                        class="w-full max-w-md rounded-3xl border border-white/70 bg-white p-5 text-sm text-[#061a42] shadow-2xl"
+                                                    >
+                                                        <div class="flex items-start justify-between gap-4">
+                                                            <div>
+                                                                <p class="text-lg font-extrabold text-[#061a42]">Confirm Payment</p>
+                                                                <p class="mt-1 text-xs font-semibold text-[#5c6a86]">{{ $order->order_number }} / Balance PHP {{ number_format($order->balance, 2) }}</p>
+                                                            </div>
+                                                            <button
+                                                                type="button"
+                                                                x-on:click="showConfirm = false"
+                                                                class="grid h-9 w-9 place-items-center rounded-xl border border-[#c8d3ea] text-lg font-bold text-[#5c6a86] hover:bg-[#f4f7ff]"
+                                                                aria-label="Close confirmation modal"
+                                                            >
+                                                                &times;
+                                                            </button>
+                                                        </div>
+
+                                                        <div class="mt-5 space-y-3">
+                                                            <p class="text-sm font-semibold text-[#5c6a86]">Are you sure you want to process this payment?</p>
+                                                            <p class="text-sm font-bold text-[#061a42]">Amount: PHP <span x-text="document.querySelector('input[name=amount]').value"></span></p>
+                                                            <p class="text-sm font-bold text-[#061a42]">Method: <span x-text="paymentMethod === 'cash' ? 'Cash' : 'GCash'"></span></p>
+                                                        </div>
+
+                                                        <div class="mt-5 flex items-center justify-end gap-2">
+                                                            <button
+                                                                type="button"
+                                                                x-on:click="showConfirm = false"
+                                                                class="rounded-2xl border border-[#c8d3ea] px-4 py-2.5 text-xs font-bold text-[#5c6a86] hover:bg-[#f4f7ff]"
+                                                            >
+                                                                Cancel
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                x-on:click="showConfirm = false; document.querySelector('form[action=\"{{ route('orders.pay', $order) }}\"]').submit()"
+                                                                class="rounded-2xl bg-[#061a42] px-5 py-2.5 text-xs font-bold text-white hover:bg-[#08285f]"
+                                                            >
+                                                                Yes, Process Payment
+                                                            </button>
+                                                        </div>
+                                                    </div>
                                                 </div>
                                             @endif
 

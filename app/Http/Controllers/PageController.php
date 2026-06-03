@@ -307,9 +307,10 @@ class PageController extends Controller
                 ['Date to', $to->format('Y-m-d')],
                 [],
                 ['Sales Reports'],
-                ['Date', 'Order No.', 'Customer', 'Service', 'Item Category', 'Status', 'Weight KG', 'Total Amount', 'Cash Paid', 'GCash Paid', 'Paid Amount', 'Balance'],
+                ['Cash', 'GCash', 'Total Sales'],
             ];
 
+            $salesRows[] = ['Money from Order'];
             foreach ($orders as $order) {
                 ['cash' => $cashPaid, 'gcash' => $gcashPaid] = $this->orderPaymentAmounts($order);
 
@@ -318,41 +319,28 @@ class PageController extends Controller
                 $salesGcashTotal += $gcashPaid;
 
                 $salesRows[] = [
-                    $order->created_at->format('Y-m-d h:i A'),
-                    $order->order_number,
-                    $order->customer?->name,
-                    $order->service?->name,
-                    $order->itemCategory?->name,
-                    str($order->status)->headline(),
-                    $order->weight_kg,
-                    number_format((float) $order->total_amount, 2, '.', ''),
                     number_format($cashPaid, 2, '.', ''),
                     number_format($gcashPaid, 2, '.', ''),
                     number_format((float) $order->paid_amount, 2, '.', ''),
-                    number_format($order->balance, 2, '.', ''),
                 ];
             }
 
             $salesRows[] = [];
-            $salesRows[] = ['Manual Daily Sales'];
-            $salesRows[] = ['Sales #', 'Date', 'Cash', 'GCash', 'Total Amount', 'Notes'];
-
+            $salesRows[] = ['Whole sale of day'];
             foreach ($manualSales as $dailySale) {
                 $salesTotal += (float) $dailySale->amount;
                 $salesCashTotal += (float) $dailySale->cash_amount;
                 $salesGcashTotal += (float) $dailySale->gcash_amount;
 
                 $salesRows[] = [
-                    $dailySale->sale_number,
-                    $dailySale->sale_date->format('Y-m-d'),
                     number_format((float) $dailySale->cash_amount, 2, '.', ''),
                     number_format((float) $dailySale->gcash_amount, 2, '.', ''),
                     number_format((float) $dailySale->amount, 2, '.', ''),
-                    $dailySale->notes,
                 ];
             }
 
-            $salesRows[] = ['Sales total', '', '', '', '', '', '', '', number_format($salesCashTotal, 2, '.', ''), number_format($salesGcashTotal, 2, '.', ''), number_format($salesTotal, 2, '.', '')];
+            $salesRows[] = [];
+            $salesRows[] = ['Total', number_format($salesCashTotal, 2, '.', ''), number_format($salesGcashTotal, 2, '.', ''), number_format($salesTotal, 2, '.', '')];
             $worksheets['Sales Reports'] = $salesRows;
         }
 
@@ -367,7 +355,7 @@ class PageController extends Controller
                 ['Date to', $to->format('Y-m-d')],
                 [],
                 ['Disbursement Reports'],
-                ['Date', 'Disbursement #', 'Name', 'Category', 'Description', 'Amount'],
+                ['Date', 'id#', 'Name', 'Category', 'Description', 'Amount'],
             ];
 
             foreach ($expenses as $expense) {
@@ -442,11 +430,13 @@ class PageController extends Controller
                 ['Date to', $to->format('Y-m-d')],
                 [],
                 ['Summary'],
-                ['Sales', number_format($salesTotal, 2, '.', '')],
-                ['Sales Cash', number_format($salesCashTotal, 2, '.', '')],
-                ['Sales GCash', number_format($salesGcashTotal, 2, '.', '')],
-                ['Disbursement', number_format($disbursementTotal, 2, '.', '')],
-                ['Sales - Disbursement', number_format($salesTotal - $disbursementTotal, 2, '.', '')],
+                ['Total Cash:', 'Total GCash:', 'Total Sales:'],
+                ['', '', ''],
+                [number_format($salesCashTotal, 2, '.', ''), number_format($salesGcashTotal, 2, '.', ''), number_format($salesTotal, 2, '.', '')],
+                ['', '', ''],
+                ['Total Disbursement:', 'Total Profit:', 'Cash on Hand:'],
+                ['', '', ''],
+                [number_format($disbursementTotal, 2, '.', ''), number_format($salesTotal - $disbursementTotal, 2, '.', ''), number_format($salesCashTotal - $disbursementTotal, 2, '.', '')],
             ];
         }
 

@@ -743,6 +743,103 @@ button {
   margin-bottom: 4px;
 }
 
+.report-summary-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.summary-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.summary-card {
+  background: var(--light-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 80px;
+}
+
+.summary-card .card-label {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.summary-card strong {
+  color: var(--navy);
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.report-table-row.total-row {
+  background: var(--light-bg);
+  font-weight: 700;
+}
+
+.report-table-row.total-row div {
+  color: var(--navy);
+}
+
+.sales-summary-table {
+  margin-top: 20px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.summary-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-bottom: 1px solid var(--border);
+}
+
+.summary-row:last-child {
+  border-bottom: none;
+}
+
+.summary-row.total-row {
+  background: var(--light-bg);
+}
+
+.summary-cell {
+  padding: 16px;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+.summary-cell:last-child {
+  border-right: none;
+}
+
+.summary-label {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.summary-cell strong {
+  color: var(--navy);
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
 .search-box {
   display: grid;
   gap: 12px;
@@ -2258,6 +2355,14 @@ legend {
 
   .service-fields,
   .report-summary-list {
+    grid-template-columns: 1fr;
+  }
+
+  .summary-cards-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .report-summary-cards {
     grid-template-columns: 1fr;
   }
 

@@ -315,35 +315,31 @@ function buildReportData(orders: OrderRow[], payments: Payment[], sales: DailySa
     totalCash,
     totalGcash,
     totalSales,
-    rows: [
-      ['Type', 'Date', 'Number', 'Name', 'Cash', 'GCash', 'Total', 'Balance'],
-      ...salesOrders.map((order) => {
-        const payment = paymentsByOrder.get(order.id) ?? { cash: order.paidAmount, gcash: 0 };
-        return ['Order', localDateFromIso(order.createdAt), order.ticket, order.customer, payment.cash, payment.gcash, payment.cash + payment.gcash, order.balance];
-      }),
-      ...manualSales.map((sale) => ['Manual Sale', sale.saleDate, sale.saleNumber, sale.notes ?? '', sale.cashAmount, sale.gcashAmount, sale.totalAmount, '']),
-      [],
-      ['Sales Summary', selection.from, 'to', selection.to, '', '', '', ''],
-      ['Order Cash', '', '', '', '', '', orderCashTotal, ''],
-      ['Order GCash', '', '', '', '', '', orderGcashTotal, ''],
-      ['Manual Cash', '', '', '', '', '', manualCashTotal, ''],
-      ['Manual GCash', '', '', '', '', '', manualGcashTotal, ''],
-      ['Total Cash', '', '', '', '', '', totalCash, ''],
-      ['Total GCash', '', '', '', '', '', totalGcash, ''],
-      ['Total Sales', '', '', '', '', '', totalSales, ''],
-    ],
+    transactions: salesOrders.map((order) => {
+      const payment = paymentsByOrder.get(order.id) ?? { cash: order.paidAmount, gcash: 0 };
+      return {
+        ticket: order.ticket,
+        customer: order.customer,
+        cash: payment.cash,
+        gcash: payment.gcash,
+        total: payment.cash + payment.gcash,
+      };
+    }),
+    manualSales: manualSales.map((sale) => ({
+      cash: sale.cashAmount,
+      gcash: sale.gcashAmount,
+      total: sale.totalAmount,
+    })),
   });
 
   const disbursementRows = () => ({
     totalExpenses,
     totalDisbursement,
     rows: [
-      ['Type', 'Date', 'Number', 'Name', 'Amount'],
-      ...filteredExpenses.map((expense) => ['Expense', expense.expenseDate, expense.number, expense.name, expense.amount]),
+      ['Date', 'id#', 'Name', 'Category', 'Description', 'Amount'],
+      ...filteredExpenses.map((expense) => [expense.expenseDate, expense.number, expense.name, expense.category ?? '', expense.description ?? '', expense.amount]),
       [],
-      ['Disbursement Summary', selection.from, 'to', selection.to, ''],
-      ['Expenses', '', '', '', totalExpenses],
-      ['Total Disbursement', '', '', '', totalDisbursement],
+      ['Total Disbursement', '', '', '', '', totalDisbursement],
     ],
   });
 
@@ -392,17 +388,15 @@ function buildReportData(orders: OrderRow[], payments: Payment[], sales: DailySa
     const salesData = salesRows();
     const disbursementData = disbursementRows();
     return [
-      ['Summary', selection.from, 'to', selection.to, '', '', '', ''],
-      ['Order Cash', '', '', '', '', '', salesData.orderCashTotal, ''],
-      ['Order GCash', '', '', '', '', '', salesData.orderGcashTotal, ''],
-      ['Manual Cash', '', '', '', '', '', salesData.manualCashTotal, ''],
-      ['Manual GCash', '', '', '', '', '', salesData.manualGcashTotal, ''],
-      ['Total Cash', '', '', '', '', '', salesData.totalCash, ''],
-      ['Total GCash', '', '', '', '', '', salesData.totalGcash, ''],
-      ['Total Sales', '', '', '', '', '', salesData.totalSales, ''],
-      ['Total Disbursement', '', '', '', '', '', disbursementData.totalDisbursement, ''],
-      ['Profit', '', '', '', '', '', profit, ''],
-      ['Cash on Hand', '', '', '', '', '', computeCashOnHand(salesData.totalCash, disbursementData.totalDisbursement), ''],
+      ['Summary', selection.from, 'to', selection.to],
+      [],
+      ['Total Cash:', 'Total GCash:', 'Total Sales:'],
+      ['', '', ''],
+      [salesData.totalCash, salesData.totalGcash, salesData.totalSales],
+      ['', '', ''],
+      ['Total Disbursement:', 'Total Profit:', 'Cash on Hand:'],
+      ['', '', ''],
+      [disbursementData.totalDisbursement, profit, computeCashOnHand(salesData.totalCash, disbursementData.totalDisbursement)],
     ];
   };
 
@@ -885,7 +879,7 @@ function renderOrderRow(order: OrderRow, staff: Staff[], services: LaundryServic
       <td><strong>${escapeHtml(order.ticket)}</strong><div class="small">${escapeHtml(formatDate(order.createdAt))}</div></td>
       <td>${escapeHtml(order.customer)}<div class="small">${escapeHtml(order.phone ?? '')}</div></td>
       <td>${escapeHtml(order.service)}${extrasLabel ? `<div class="small">Extras: ${extrasLabel}</div>` : ''}</td>
-      <td class="amount-cell"><strong>${money(order.totalAmount)}</strong><div class="small">${escapeHtml(paymentStatusLabel)} · Paid ${money(order.paidAmount)} · Bal ${money(order.balance)}</div></td>
+      <td class="amount-cell"><strong>${money(order.totalAmount)}</strong><div class="small">${escapeHtml(paymentStatusLabel)} · Paid ${money(order.paidAmount)} · Bal PHP ***</div></td>
       <td>
       <div class="row-actions">
         ${nextStep ? `<form class="inline-form advance-form" data-order-id="${order.id}">
@@ -1348,16 +1342,34 @@ function renderReports(orders: OrderRow[], payments: Payment[], sales: DailySale
           <article>
             ${sectionTitle('Sales report preview', `${preview.selection.from} to ${preview.selection.to}`)}
             <div class="table wide-table report-preview-table">
-              <div class="table-head report-table-head"><div>Type</div><div>Date</div><div>Number</div><div>Name</div><div>Cash</div><div>GCash</div><div>Total</div><div>Balance</div></div>
-              ${preview.salesRows().rows.slice(1).filter((row) => row.length).map((row) => `<div class="table-row report-table-row">${row.map((value, index) => `<div>${reportPreviewCell(value, index)}</div>`).join('')}</div>`).join('')}
+              <div class="table-head report-table-head"><div>Ticket</div><div>Customer</div><div>Cash</div><div>GCash</div><div>Total Payment</div></div>
+              ${preview.salesRows().transactions.map((tx) => `<div class="table-row report-table-row"><div>${escapeHtml(tx.ticket)}</div><div>${escapeHtml(tx.customer)}</div><div>${money(tx.cash)}</div><div>${money(tx.gcash)}</div><div>${money(tx.total)}</div></div>`).join('')}
+            </div>
+            <div class="sales-summary-table">
+              <div class="summary-row">
+                <div class="summary-cell"><span class="summary-label">Cash from Orders</span><strong>${money(preview.salesRows().orderCashTotal)}</strong></div>
+                <div class="summary-cell"><span class="summary-label">GCash from Orders</span><strong>${money(preview.salesRows().orderGcashTotal)}</strong></div>
+                <div class="summary-cell"><span class="summary-label">Sales from Orders</span><strong>${money(preview.salesRows().orderCashTotal + preview.salesRows().orderGcashTotal)}</strong></div>
+              </div>
+              <div class="summary-row">
+                <div class="summary-cell"><span class="summary-label">Cash Whole Sale</span><strong>${money(preview.salesRows().manualCashTotal)}</strong></div>
+                <div class="summary-cell"><span class="summary-label">GCash Whole Sale</span><strong>${money(preview.salesRows().manualGcashTotal)}</strong></div>
+                <div class="summary-cell"><span class="summary-label">Whole Sale of Day</span><strong>${money(preview.salesRows().manualCashTotal + preview.salesRows().manualGcashTotal)}</strong></div>
+              </div>
+              <div class="summary-row total-row">
+                <div class="summary-cell"><span class="summary-label">Total Cash</span><strong>${money(preview.salesRows().totalCash)}</strong></div>
+                <div class="summary-cell"><span class="summary-label">Total GCash</span><strong>${money(preview.salesRows().totalGcash)}</strong></div>
+                <div class="summary-cell"><span class="summary-label">Total Sales</span><strong>${money(preview.salesRows().totalSales)}</strong></div>
+              </div>
             </div>
           </article>` : ''}
         ${preview.selectedTypes.has('disbursement') ? `
           <article>
             ${sectionTitle('Disbursement preview', `${preview.selection.from} to ${preview.selection.to}`)}
             <div class="table wide-table report-preview-table report-disbursement-table">
-              <div class="table-head report-table-head"><div>Type</div><div>Date</div><div>Number</div><div>Name</div><div>Amount</div></div>
-              ${preview.disbursementRows().rows.slice(1).map((row) => `<div class="table-row report-table-row">${row.map((value) => `<div>${escapeHtml(value ?? '')}</div>`).join('')}</div>`).join('')}
+              <div class="table-head report-table-head"><div>ID#</div><div>Name</div><div>Category</div><div>Amount</div><div>Date</div></div>
+              ${preview.disbursementRows().rows.slice(1).filter((row) => row.length && row[0] !== 'Total Disbursement').map((row) => `<div class="table-row report-table-row"><div>${escapeHtml(row[1] ?? '')}</div><div>${escapeHtml(row[2] ?? '')}</div><div>${escapeHtml(row[3] ?? '')}</div><div>${money(row[5] as number)}</div><div>${escapeHtml(row[0] ?? '')}</div></div>`).join('')}
+              <div class="table-row report-table-row total-row"><div></div><div></div><div>Total Disbursement</div><div>${money(preview.disbursementRows().totalDisbursement)}</div><div></div></div>
             </div>
           </article>` : ''}
         ${preview.selectedTypes.has('fold_count') ? `
@@ -1401,8 +1413,13 @@ function renderReports(orders: OrderRow[], payments: Payment[], sales: DailySale
         ${preview.selectedTypes.has('summary') ? `
           <article>
             ${sectionTitle('Summary preview', `${preview.selection.from} to ${preview.selection.to}`)}
-            <div class="summary-list report-summary-list">
-              ${preview.summaryRows().map((row) => `<div><span>${escapeHtml(row[0] as string)}</span><strong>${escapeHtml(String(row[6] ?? '0'))}</strong></div>`).join('')}
+            <div class="summary-cards-grid">
+              <div class="summary-card"><span class="card-label">Total Cash</span><strong>${money(preview.salesRows().totalCash)}</strong></div>
+              <div class="summary-card"><span class="card-label">Total GCash</span><strong>${money(preview.salesRows().totalGcash)}</strong></div>
+              <div class="summary-card"><span class="card-label">Total Sales</span><strong>${money(preview.salesRows().totalSales)}</strong></div>
+              <div class="summary-card"><span class="card-label">Total Disbursement</span><strong>${money(preview.disbursementRows().totalDisbursement)}</strong></div>
+              <div class="summary-card"><span class="card-label">Total Profit</span><strong>${money(preview.profit)}</strong></div>
+              <div class="summary-card"><span class="card-label">Cash on Hand</span><strong>${money(computeCashOnHand(preview.salesRows().totalCash, preview.disbursementRows().totalDisbursement))}</strong></div>
             </div>
           </article>` : ''}
       </section>
@@ -1931,7 +1948,13 @@ function bindOrderForms(data: Awaited<ReturnType<typeof loadData>>) {
     paymentForm.addEventListener('submit', async (event) => {
       event.preventDefault();
       const fd = new FormData(paymentForm);
-      await recordPayment(Number(paymentForm.dataset.orderId), { amount: Number(fd.get('amount')), method: String(fd.get('method')) as 'cash' | 'gcash', reference: String(fd.get('reference') ?? '') || null });
+      const amount = Number(fd.get('amount'));
+      const method = String(fd.get('method')) as 'cash' | 'gcash';
+      const reference = String(fd.get('reference') ?? '') || null;
+      
+      if (!confirm(`Confirm payment of ${money(amount)} via ${method.toUpperCase()}?`)) return;
+      
+      await recordPayment(Number(paymentForm.dataset.orderId), { amount, method, reference });
       await render();
     });
   });
@@ -2246,7 +2269,23 @@ function bindReportActions(orders: OrderRow[], payments: Payment[], sales: Daily
     const selection = currentReportSelection();
     const report = buildReportData(orders, payments, sales, expenses, revolvingHistory, foldRate, selection);
     const sheets: Array<{ name: string; rows: Array<Array<string | number>> }> = [];
-    if (report.selectedTypes.has('sales')) sheets.push({ name: 'Sales Report', rows: report.salesRows().rows });
+    if (report.selectedTypes.has('sales')) {
+      const salesData = report.salesRows();
+      const salesRows: Array<Array<string | number>> = [
+        ['Ticket', 'Customer', 'Cash', 'GCash', 'Total Payment'],
+        ...salesData.transactions.map((tx) => [tx.ticket, tx.customer, tx.cash, tx.gcash, tx.total]),
+        [],
+        ['Cash from Orders', 'GCash from Orders', 'Sales from Orders'],
+        [salesData.orderCashTotal, salesData.orderGcashTotal, salesData.orderCashTotal + salesData.orderGcashTotal],
+        [],
+        ['Cash Whole Sale', 'GCash Whole Sale', 'Whole Sale of Day'],
+        [salesData.manualCashTotal, salesData.manualGcashTotal, salesData.manualCashTotal + salesData.manualGcashTotal],
+        [],
+        ['Total Cash', 'Total GCash', 'Total Sales'],
+        [salesData.totalCash, salesData.totalGcash, salesData.totalSales],
+      ];
+      sheets.push({ name: 'Sales Report', rows: salesRows });
+    }
     if (report.selectedTypes.has('disbursement')) sheets.push({ name: 'Disbursement', rows: report.disbursementRows().rows });
     if (report.selectedTypes.has('fold_count')) sheets.push({ name: 'Fold Count', rows: report.foldCountRows().rows });
     if (report.selectedTypes.has('revolving_fund')) {
