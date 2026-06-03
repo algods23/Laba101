@@ -1439,6 +1439,11 @@ legend {
   padding: 14px;
 }
 
+.daily-report-table .table-head,
+.daily-report-table .table-row {
+  grid-template-columns: 1fr 0.9fr 1fr 1fr 0.9fr minmax(132px, auto);
+}
+
 .table-scroll {
   width: 100%;
   max-width: 100%;

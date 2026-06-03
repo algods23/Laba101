@@ -30,6 +30,8 @@ import {
   listStaff,
   listSubcleanings,
   recordPayment,
+  deleteDailySale,
+  deleteExpense,
   deleteOrderForRefund,
   saveDailySale,
   saveItemCategory,
@@ -38,6 +40,7 @@ import {
   saveSubcleaning,
   saveRevolvingHistory,
   setSetting,
+  updateExpense,
   workflowSteps,
   getSetting,
   updateMachine,
@@ -233,6 +236,10 @@ function formatDateTimeStack(value: string) {
 
 function isGensanStaff(user: Staff | null) {
   return user?.role === 'staff' && user.branch === 'Gensan Branch';
+}
+
+function isMintalStaff(user: Staff | null) {
+  return user?.role === 'staff' && user.branch.toLowerCase().includes('mintal');
 }
 
 function renderHtmlTable(headers: string[], bodyRows: string[][], tableClass = 'data-table') {
@@ -471,7 +478,15 @@ async function render() {
   const openQueue = data.orders.filter((order) => order.status !== 'claimed').length;
   const readyPickup = data.orders.filter((order) => order.status === 'ready').length;
   const orderSales = data.orders.reduce((sum, order) => sum + order.paidAmount, 0);
-  const paidToday = data.orders.filter((order) => localDateFromIso(order.createdAt) === today()).reduce((sum, order) => sum + order.paidAmount, 0);
+  const todayValue = today();
+  const paidToday = data.orders.filter((order) => localDateFromIso(order.createdAt) === todayValue).reduce((sum, order) => sum + order.paidAmount, 0)
+    + data.sales.filter((sale) => sale.saleDate === todayValue).reduce((sum, sale) => sum + sale.totalAmount, 0);
+  const cashPaidToday = data.payments
+    .filter((payment) => payment.branch === data.branch && payment.method === 'cash' && localDateFromIso(payment.receivedAt) === todayValue)
+    .reduce((sum, payment) => sum + payment.amount, 0)
+    + data.sales.filter((sale) => sale.saleDate === todayValue).reduce((sum, sale) => sum + sale.cashAmount, 0);
+  const disbursementToday = data.expenses.filter((expense) => expense.expenseDate === todayValue).reduce((sum, expense) => sum + expense.amount, 0);
+  const cashOnHandToday = computeCashOnHand(cashPaidToday, disbursementToday);
   const manualSales = data.sales.reduce((sum, sale) => sum + sale.totalAmount, 0);
   const salesTotal = orderSales + manualSales;
   const disbursementTotal = data.expenses.reduce((sum, row) => sum + row.amount, 0);
@@ -538,7 +553,7 @@ async function render() {
           <button class="mobile-avatar" type="button">${initials(state.currentUser)}</button>
         </header>
 
-        ${state.tab === 'dashboard' ? renderDashboard({ paidToday, orders: data.orders }) : ''}
+        ${state.tab === 'dashboard' ? renderDashboard({ paidToday, cashPaidToday, disbursementToday, cashOnHandToday, orders: data.orders, payments: data.payments, sales: data.sales }) : ''}
         ${state.tab === 'pos' ? renderPos(data.orders, data.customers, data.services, data.categories, data.payments, data.branch) : ''}
         ${state.tab === 'orders' ? renderOrders(data.orders, data.staff, data.services, data.payments) : ''}
         ${state.tab === 'archived' ? renderArchivedOrders(data.orders, data.staff, data.services, data.payments) : ''}
@@ -558,7 +573,7 @@ async function render() {
   bindNavigation();
   bindOrderForms(data);
   bindPricingForms(data.allServices);
-  bindDisbursementForms();
+  bindDisbursementForms(data.expenses);
   bindReportActions(data.orders, data.sales, data.expenses, data.revolvingHistory, data.foldRate);
   bindOrderFilters();
   bindCustomerSearch();
@@ -571,8 +586,9 @@ async function render() {
 
 function visibleTabs(): TabKey[] {
   if (state.currentUser?.role === 'admin') return (Object.keys(tabLabels) as TabKey[]).filter((t) => t !== 'inventory');
-  if (isGensanStaff(state.currentUser)) return ['disbursements', 'reports', 'maintenance', 'revolving'];
-  return ['pos', 'orders', 'archived', 'disbursements', 'reports', 'maintenance', 'revolving'];
+  const staffTabs: TabKey[] = ['dashboard', 'pos', 'orders', 'archived', 'disbursements', 'reports', 'maintenance', 'revolving'];
+  if (isGensanStaff(state.currentUser)) return ['dashboard', 'disbursements', 'reports', 'maintenance', 'revolving'];
+  return isMintalStaff(state.currentUser) ? staffTabs.filter((tab) => tab !== 'revolving') : staffTabs;
 }
 
 function renderLogin() {
@@ -610,7 +626,7 @@ function bindLoginShortcuts() {
   });
 }
 
-function renderDashboard(metrics: { paidToday: number; orders: OrderRow[] }) {
+function renderDashboard(metrics: { paidToday: number; cashPaidToday: number; disbursementToday: number; cashOnHandToday: number; orders: OrderRow[]; payments: Payment[]; sales: DailySale[] }) {
   const now = new Date();
   const chartDays = Array.from({ length: 7 }, (_, index) => {
     const date = new Date(now);
@@ -621,9 +637,13 @@ function renderDashboard(metrics: { paidToday: number; orders: OrderRow[] }) {
     const date = new Date(now);
     date.setDate(now.getDate() - (6 - index));
     const key = localDateInput(date);
-    return metrics.orders
+    const posPaid = metrics.orders
       .filter((order) => localDateFromIso(order.createdAt) === key)
       .reduce((sum, order) => sum + order.paidAmount, 0);
+    const manualPaid = metrics.sales
+      .filter((sale) => sale.saleDate === key)
+      .reduce((sum, sale) => sum + sale.totalAmount, 0);
+    return posPaid + manualPaid;
   });
   const chartMax = Math.max(1, ...chartValues);
   const chartHeight = 210;
@@ -633,6 +653,9 @@ function renderDashboard(metrics: { paidToday: number; orders: OrderRow[] }) {
         ${sectionTitle('Revenue overview', 'Paid amount for the last 7 days.')}
         <div class="stats compact dashboard-stats">
           <div class="stat"><span class="card-label">Paid Today</span><div class="value">${money(metrics.paidToday)}</div></div>
+          <div class="stat"><span class="card-label">Cash Today</span><div class="value">${money(metrics.cashPaidToday)}</div></div>
+          <div class="stat"><span class="card-label">Disbursement</span><div class="value">${money(metrics.disbursementToday)}</div></div>
+          <div class="stat"><span class="card-label">Cash on Hand</span><div class="value">${money(metrics.cashOnHandToday)}</div></div>
         </div>
         <div class="chart-shell">
           <div class="mini-chart revenue-chart">
@@ -643,7 +666,7 @@ function renderDashboard(metrics: { paidToday: number; orders: OrderRow[] }) {
           </div>
           <div class="chart-days">${chartDays.map((label) => `<span>${escapeHtml(label)}</span>`).join('')}</div>
         </div>
-        <div class="chart-footnote">Values are based on order payments for the last 7 days.</div>
+        <div class="chart-footnote">Values include POS payments and Daily Report sales input.</div>
       </article>
     </section>
   `;
@@ -1168,7 +1191,7 @@ function renderPricing(services: LaundryService[], categories: ItemCategory[]) {
           `).join('')}
         </div>
         <div class="section-divider"></div>
-        <div class="table">
+        <div class="table daily-report-table">
           <div class="table-head"><div>Name</div><div>Max KG</div><div></div><div></div><div></div></div>
           ${categories.map((category) => `<div class="table-row"><div>${escapeHtml(category.name)}</div><div>${category.maxKg}</div><div></div><div></div><div></div></div>`).join('')}
         </div>
@@ -1180,6 +1203,7 @@ function renderPricing(services: LaundryService[], categories: ItemCategory[]) {
 function renderDisbursements(expenses: DisbursementExpense[], sales: DailySale[]) {
   const todayValue = today();
   const monthValue = todayValue.slice(0, 7);
+  const isAdmin = state.currentUser?.role === 'admin';
   const dailyExpense = expenses.filter((item) => item.expenseDate === todayValue).reduce((sum, item) => sum + item.amount, 0);
   const monthlyExpense = expenses.filter((item) => item.expenseDate.startsWith(monthValue)).reduce((sum, item) => sum + item.amount, 0);
   const todaysManualSales = sales.filter((item) => item.saleDate === todayValue).reduce((sum, item) => sum + item.totalAmount, 0);
@@ -1205,6 +1229,7 @@ function renderDisbursements(expenses: DisbursementExpense[], sales: DailySale[]
       <article class="panel">
         ${sectionTitle('Input disbursement', 'Supplies, utilities, and cash disbursements')}
         <form id="expense-form" class="form">
+          <input name="id" type="hidden" />
           <div class="form-row"><label>Date<input name="expenseDate" type="date" value="${today()}" required /></label><label>Amount<input name="amount" type="number" min="0" step="0.01" required /></label></div>
           <div class="form-row"><label>Name<input name="name" required /></label><label>Category<input name="category" required /></label></div>
           <label>Description<textarea name="description"></textarea></label>
@@ -1214,8 +1239,8 @@ function renderDisbursements(expenses: DisbursementExpense[], sales: DailySale[]
       <article class="panel">
         ${sectionTitle('Disbursement list', 'Expenses only')}
         <div class="table">
-          <div class="table-head"><div>Date</div><div>No.</div><div>Name</div><div>Category</div><div>Amount</div></div>
-          ${expenses.map((item) => `<div class="table-row"><div>${escapeHtml(item.expenseDate)}</div><div>${escapeHtml(item.number)}</div><div>${escapeHtml(item.name)}</div><div>${escapeHtml(item.category)}</div><div>${money(item.amount)}</div></div>`).join('') || '<div class="helper">No expenses yet.</div>'}
+          <div class="table-head"><div>Date</div><div>No.</div><div>Name</div><div>Category</div><div>Amount</div><div>Action</div></div>
+          ${expenses.map((item) => `<div class="table-row"><div>${escapeHtml(item.expenseDate)}</div><div>${escapeHtml(item.number)}</div><div>${escapeHtml(item.name)}</div><div>${escapeHtml(item.category)}</div><div>${money(item.amount)}</div><div class="row-actions"><button class="secondary edit-expense-btn" data-id="${item.id}" type="button">Edit</button>${isAdmin ? `<button class="secondary delete-expense-btn" data-id="${item.id}" type="button">Delete</button>` : ''}</div></div>`).join('') || '<div class="helper">No expenses yet.</div>'}
         </div>
       </article>
     </section>
@@ -1224,6 +1249,7 @@ function renderDisbursements(expenses: DisbursementExpense[], sales: DailySale[]
       <article class="panel">
         ${sectionTitle('Input total sale', 'Manual cash and GCash totals')}
         <form id="sales-form" class="form">
+          <input name="id" type="hidden" />
           <label>Date<input name="saleDate" type="date" value="${today()}" required /></label>
           <label>Cash sales<input name="cashAmount" type="number" min="0" step="0.01" value="0" /></label>
           <label>GCash sales<input name="gcashAmount" type="number" min="0" step="0.01" value="0" /></label>
@@ -1233,9 +1259,9 @@ function renderDisbursements(expenses: DisbursementExpense[], sales: DailySale[]
       </article>
       <article class="panel">
         ${sectionTitle('Daily sales history', 'Cash, GCash, total sale, notes, and updates')}
-        <div class="table wide-table">
-          <div class="table-head"><div>Sales #</div><div>Date</div><div>Cash</div><div>GCash</div><div>Total sale</div></div>
-          ${sales.map((item) => `<div class="table-row"><div>${escapeHtml(item.saleNumber)}</div><div>${escapeHtml(item.saleDate)}</div><div>${money(item.cashAmount)}</div><div>${money(item.gcashAmount)}</div><div><strong>${money(item.totalAmount)}</strong></div></div>`).join('') || '<div class="helper">No daily sales totals yet.</div>'}
+        <div class="table wide-table daily-report-table">
+          <div class="table-head"><div>Sales #</div><div>Date</div><div>Cash</div><div>GCash</div><div>Total sale</div><div>Action</div></div>
+          ${sales.map((item) => `<div class="table-row"><div>${escapeHtml(item.saleNumber)}</div><div>${escapeHtml(item.saleDate)}</div><div>${money(item.cashAmount)}</div><div>${money(item.gcashAmount)}</div><div><strong>${money(item.totalAmount)}</strong></div><div class="row-actions"><button class="secondary edit-sale-btn" data-id="${item.id}" type="button">Edit</button>${isAdmin ? `<button class="secondary delete-sale-btn" data-id="${item.id}" type="button">Delete</button>` : ''}</div></div>`).join('') || '<div class="helper">No daily sales totals yet.</div>'}
         </div>
       </article>
     </section>
@@ -1733,6 +1759,7 @@ function bindOrderForms(data: Awaited<ReturnType<typeof loadData>>) {
   const paymentMethod = form?.querySelector<HTMLSelectElement>('select[name="paymentMethod"]');
   const paymentReferenceWrap = form?.querySelector<HTMLElement>('.gcash-reference');
   const paymentReference = form?.querySelector<HTMLInputElement>('input[name="paymentReference"]');
+  let orderSubmitAttempted = false;
   const syncCustomer = () => {
     if (!customerSelect || !customerName || !customerPhone) return;
     const option = customerSelect.selectedOptions[0];
@@ -1783,8 +1810,8 @@ function bindOrderForms(data: Awaited<ReturnType<typeof loadData>>) {
     if (!selectedServices.length || !primaryService || !category) {
       if (saveButton) saveButton.disabled = true;
       if (orderError) {
-        orderError.hidden = false;
-        orderError.textContent = 'Please select at least one service quantity.';
+        orderError.hidden = !orderSubmitAttempted;
+        orderError.textContent = orderSubmitAttempted ? 'Please select at least one service quantity.' : '';
       }
       preview.innerHTML = '<div class="preview-total"><span>Total amount</span><strong>PHP 0.00</strong></div>';
       return;
@@ -1812,18 +1839,22 @@ function bindOrderForms(data: Awaited<ReturnType<typeof loadData>>) {
   refreshPreview();
   form?.addEventListener('submit', async (event) => {
     event.preventDefault();
+    orderSubmitAttempted = true;
     const fd = new FormData(form);
     const selectedServices = serviceInputsFromForm(form, data.services);
     const primaryService = selectedServices[0];
     const category = defaultCategoryForService(primaryService, data.categories);
     const addons = addonInputsFromForm(form, data.services);
-    if (!selectedServices.length) {
+    if (!selectedServices.length || !primaryService || !category) {
       if (orderError) {
         orderError.hidden = false;
         orderError.textContent = 'Please select at least one service quantity.';
       }
       return;
     }
+    const selectedServiceLabels = selectedServices.map((service) => `${service.name} x${service.quantity}`).join(', ');
+    const totalPreview = calculatePricing(selectedServices, category, defaultWeightForService(primaryService, category), addons);
+    if (!confirm(`Save this order?\n\nServices: ${selectedServiceLabels}\nTotal: ${money(totalPreview.totalAmount)}`)) return;
     try {
       await createOrder({
         customerId: Number(fd.get('customerId')) || undefined,
@@ -1985,12 +2016,40 @@ function bindPricingForms(services: LaundryService[]) {
   });
 }
 
-function bindDisbursementForms() {
-  document.querySelector<HTMLFormElement>('#expense-form')?.addEventListener('submit', async (event) => {
+function bindDisbursementForms(expenses: DisbursementExpense[]) {
+  const expenseForm = document.querySelector<HTMLFormElement>('#expense-form');
+  expenseForm?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const fd = new FormData(event.currentTarget);
-    await createExpense({ expenseDate: String(fd.get('expenseDate') ?? ''), name: String(fd.get('name') ?? ''), category: String(fd.get('category') ?? ''), description: String(fd.get('description') ?? ''), amount: Number(fd.get('amount') ?? 0) });
+    const id = Number(fd.get('id') || 0);
+    const input = { expenseDate: String(fd.get('expenseDate') ?? ''), name: String(fd.get('name') ?? ''), category: String(fd.get('category') ?? ''), description: String(fd.get('description') ?? ''), amount: Number(fd.get('amount') ?? 0) };
+    if (id) await updateExpense(id, input);
+    else await createExpense(input);
     await render();
+  });
+  document.querySelectorAll<HTMLButtonElement>('.edit-expense-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const expense = expenses.find((item) => item.id === Number(btn.dataset.id));
+      if (!expense || !expenseForm) return;
+      (expenseForm.querySelector('[name=id]') as HTMLInputElement).value = String(expense.id);
+      (expenseForm.querySelector('[name=expenseDate]') as HTMLInputElement).value = expense.expenseDate;
+      (expenseForm.querySelector('[name=amount]') as HTMLInputElement).value = String(expense.amount);
+      (expenseForm.querySelector('[name=name]') as HTMLInputElement).value = expense.name;
+      (expenseForm.querySelector('[name=category]') as HTMLInputElement).value = expense.category;
+      (expenseForm.querySelector('[name=description]') as HTMLTextAreaElement).value = expense.description ?? '';
+      const submitButton = expenseForm.querySelector<HTMLButtonElement>('button[type="submit"]');
+      if (submitButton) submitButton.textContent = 'Update expense';
+      expenseForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+  document.querySelectorAll<HTMLButtonElement>('.delete-expense-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (state.currentUser?.role !== 'admin') return;
+      const id = Number(btn.dataset.id);
+      if (!Number.isFinite(id) || !confirm('Delete this disbursement?')) return;
+      await deleteExpense(id);
+      await render();
+    });
   });
   document.querySelector<HTMLFormElement>('#fold-form')?.addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -2006,11 +2065,35 @@ function bindReportActions(orders: OrderRow[], sales: DailySale[], expenses: Dis
     void render();
   });
 
-  document.querySelector<HTMLFormElement>('#sales-form')?.addEventListener('submit', async (event) => {
+  const salesForm = document.querySelector<HTMLFormElement>('#sales-form');
+  salesForm?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const fd = new FormData(event.currentTarget);
-    await saveDailySale({ saleDate: String(fd.get('saleDate') ?? ''), cashAmount: Number(fd.get('cashAmount') ?? 0), gcashAmount: Number(fd.get('gcashAmount') ?? 0), notes: String(fd.get('notes') ?? '') });
+    await saveDailySale({ id: Number(fd.get('id') || 0) || undefined, saleDate: String(fd.get('saleDate') ?? ''), cashAmount: Number(fd.get('cashAmount') ?? 0), gcashAmount: Number(fd.get('gcashAmount') ?? 0), notes: String(fd.get('notes') ?? '') });
     await render();
+  });
+  document.querySelectorAll<HTMLButtonElement>('.edit-sale-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const sale = sales.find((item) => item.id === Number(btn.dataset.id));
+      if (!sale || !salesForm) return;
+      (salesForm.querySelector('[name=id]') as HTMLInputElement).value = String(sale.id);
+      (salesForm.querySelector('[name=saleDate]') as HTMLInputElement).value = sale.saleDate;
+      (salesForm.querySelector('[name=cashAmount]') as HTMLInputElement).value = String(sale.cashAmount);
+      (salesForm.querySelector('[name=gcashAmount]') as HTMLInputElement).value = String(sale.gcashAmount);
+      (salesForm.querySelector('[name=notes]') as HTMLTextAreaElement).value = sale.notes ?? '';
+      const submitButton = salesForm.querySelector<HTMLButtonElement>('button[type="submit"]');
+      if (submitButton) submitButton.textContent = 'Update daily sale';
+      salesForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+  document.querySelectorAll<HTMLButtonElement>('.delete-sale-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (state.currentUser?.role !== 'admin') return;
+      const id = Number(btn.dataset.id);
+      if (!Number.isFinite(id) || !confirm('Delete this daily sale?')) return;
+      await deleteDailySale(id);
+      await render();
+    });
   });
   const dateFromInput = document.querySelector<HTMLInputElement>('[data-date-from]');
   const dateToInput = document.querySelector<HTMLInputElement>('[data-date-to]');

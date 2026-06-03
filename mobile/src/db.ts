@@ -1223,6 +1223,39 @@ export async function createExpense(input: { expenseDate: string; name: string; 
   });
 }
 
+export async function updateExpense(id: number, input: { expenseDate: string; name: string; category: string; description: string; amount: number }) {
+  if (!Capacitor.isNativePlatform()) {
+    const items = readBrowser<DisbursementExpense[]>('expenses', seedExpenses);
+    const existing = items.find((item) => item.id === id);
+    if (existing) {
+      Object.assign(existing, {
+        expenseDate: input.expenseDate,
+        name: input.name,
+        category: input.category,
+        description: input.description || null,
+        amount: input.amount,
+      });
+      writeBrowser('expenses', items);
+    }
+    return;
+  }
+  const db = await ensureNativeDb();
+  await db.run(
+    'UPDATE disbursement_expenses SET expenseDate = ?, name = ?, category = ?, description = ?, amount = ? WHERE id = ?',
+    [input.expenseDate, input.name, input.category, input.description || null, input.amount, id],
+  );
+}
+
+export async function deleteExpense(id: number) {
+  if (!Capacitor.isNativePlatform()) {
+    const items = readBrowser<DisbursementExpense[]>('expenses', seedExpenses);
+    writeBrowser('expenses', items.filter((item) => item.id !== id));
+    return;
+  }
+  const db = await ensureNativeDb();
+  await db.run('DELETE FROM disbursement_expenses WHERE id = ?', [id]);
+}
+
 export async function listDailySales(): Promise<DailySale[]> {
   if (!Capacitor.isNativePlatform()) return readBrowser<DailySale[]>('sales', seedSales);
   const db = await ensureNativeDb();
@@ -1230,12 +1263,12 @@ export async function listDailySales(): Promise<DailySale[]> {
   return (result.values ?? []) as DailySale[];
 }
 
-export async function saveDailySale(input: { saleDate: string; cashAmount: number; gcashAmount: number; notes: string }) {
+export async function saveDailySale(input: { id?: number; saleDate: string; cashAmount: number; gcashAmount: number; notes: string }) {
   const totalAmount = Number((input.cashAmount + input.gcashAmount).toFixed(2));
   if (!Capacitor.isNativePlatform()) {
     const items = readBrowser<DailySale[]>('sales', seedSales);
-    const existing = items.find((item) => item.saleDate === input.saleDate);
-    if (existing) Object.assign(existing, { cashAmount: input.cashAmount, gcashAmount: input.gcashAmount, totalAmount, notes: input.notes || null });
+    const existing = input.id ? items.find((item) => item.id === input.id) : items.find((item) => item.saleDate === input.saleDate);
+    if (existing) Object.assign(existing, { saleDate: input.saleDate, cashAmount: input.cashAmount, gcashAmount: input.gcashAmount, totalAmount, notes: input.notes || null });
     else {
       const id = nextNumericId(items);
       items.unshift({ id, saleDate: input.saleDate, saleNumber: `SALE-${String(id).padStart(2, '0')}`, cashAmount: input.cashAmount, gcashAmount: input.gcashAmount, totalAmount, notes: input.notes || null });
@@ -1244,14 +1277,26 @@ export async function saveDailySale(input: { saleDate: string; cashAmount: numbe
     return;
   }
   const db = await ensureNativeDb();
-  const result = await db.query('SELECT id, saleNumber FROM daily_sales WHERE saleDate = ?', [input.saleDate]);
+  const result = input.id
+    ? await db.query('SELECT id, saleNumber FROM daily_sales WHERE id = ?', [input.id])
+    : await db.query('SELECT id, saleNumber FROM daily_sales WHERE saleDate = ?', [input.saleDate]);
   const existing = result.values?.[0] as { id: number; saleNumber?: string } | undefined;
-  if (existing) await db.run('UPDATE daily_sales SET cashAmount = ?, gcashAmount = ?, totalAmount = ?, notes = ? WHERE id = ?', [input.cashAmount, input.gcashAmount, totalAmount, input.notes || null, existing.id]);
+  if (existing) await db.run('UPDATE daily_sales SET saleDate = ?, cashAmount = ?, gcashAmount = ?, totalAmount = ?, notes = ? WHERE id = ?', [input.saleDate, input.cashAmount, input.gcashAmount, totalAmount, input.notes || null, existing.id]);
   else {
     const idResult = await db.query('SELECT COALESCE(MAX(id), 0) + 1 as id FROM daily_sales');
     const id = Number((idResult.values?.[0] as { id: number }).id);
     await db.run('INSERT INTO daily_sales (saleDate, saleNumber, cashAmount, gcashAmount, totalAmount, notes) VALUES (?, ?, ?, ?, ?, ?)', [input.saleDate, `SALE-${String(id).padStart(2, '0')}`, input.cashAmount, input.gcashAmount, totalAmount, input.notes || null]);
   }
+}
+
+export async function deleteDailySale(id: number) {
+  if (!Capacitor.isNativePlatform()) {
+    const items = readBrowser<DailySale[]>('sales', seedSales);
+    writeBrowser('sales', items.filter((item) => item.id !== id));
+    return;
+  }
+  const db = await ensureNativeDb();
+  await db.run('DELETE FROM daily_sales WHERE id = ?', [id]);
 }
 
 export async function updateDailySaleStatus(id: number, status: string, endorsedTo: string | null = null, statusUpdatedAt: string) {
