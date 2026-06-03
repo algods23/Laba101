@@ -6,6 +6,8 @@
   --panel: rgba(255, 255, 255, 0.9);
   --line: #c8d3ea;
   --soft-line: #d8e1f5;
+  --border: #c8d3ea;
+  --light-bg: #f8fbff;
   --ink: #0f172a;
   --muted: #5c6a86;
   --soft: #f4f7ff;
@@ -838,12 +840,15 @@ button {
   color: white;
   font-weight: 600;
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1fr;
+  grid-template-columns: minmax(80px, 1.5fr) 1fr 1fr 1fr;
+  gap: 0;
 }
 
 .sales-summary-table .table-head div {
   padding: 8px 12px;
   text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sales-summary-table .table-head div:first-child {
@@ -852,8 +857,9 @@ button {
 
 .sales-summary-table .table-row {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1fr;
+  grid-template-columns: minmax(80px, 1.5fr) 1fr 1fr 1fr;
   border-bottom: 1px solid var(--border);
+  gap: 0;
 }
 
 .sales-summary-table .table-row:last-child {
@@ -863,6 +869,8 @@ button {
 .sales-summary-table .table-row div {
   padding: 8px 12px;
   text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sales-summary-table .table-row div:first-child {

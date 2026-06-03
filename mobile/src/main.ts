@@ -1172,6 +1172,9 @@ function renderCustomers(customers: Customer[], orders: OrderRow[]) {
 }
 
 function renderPricing(services: LaundryService[], categories: ItemCategory[]) {
+  const orderServices = services.filter((service) => service.serviceType === 'order');
+  const addonServices = services.filter((service) => service.serviceType === 'addon');
+
   return `
     <section class="grid content full">
       <article class="panel">
@@ -1213,31 +1216,20 @@ function renderPricing(services: LaundryService[], categories: ItemCategory[]) {
         </form>
       </article>
       <article class="panel span-2">
-        <div class="service-card-grid">
-          ${services.map((service) => `
-            <article class="service-card">
-              <header>
-                <strong>${escapeHtml(service.name)}</strong>
-                <span>${escapeHtml(service.category)}</span>
-              </header>
-              <div class="service-fields">
-                <div><span>price:</span><strong>${money(service.price)}</strong></div>
-                <div><span>type:</span><strong>${escapeHtml(service.serviceType)}</strong></div>
-                <div><span>category:</span><strong>${escapeHtml(service.category)}</strong></div>
-                <div><span>active:</span><strong>${service.isActive ? 'yes' : 'no'}</strong></div>
-              </div>
-              <div class="service-meta">Includes: ${escapeHtml(service.includes.join(', ') || 'none')}</div>
-              <div class="row-actions">
-                <button class="secondary edit-service-btn" data-id="${service.id}">Edit</button>
-                ${service.isActive ? `<button class="secondary deactivate-service-btn" data-id="${service.id}">Deactivate</button>` : `<button class="secondary activate-service-btn" data-id="${service.id}">Activate</button>`}
-              </div>
-            </article>
-          `).join('')}
+        ${sectionTitle('Services Table', 'Order services')}
+        <div class="table-scroll">
+          <div class="table data-table">
+            <div class="table-head"><div>Name</div><div>Category</div><div>Price</div><div>Max KG</div><div>Includes</div><div>Status</div><div>Actions</div></div>
+            ${orderServices.map((service) => `<div class="table-row"><div><strong>${escapeHtml(service.name)}</strong></div><div>${escapeHtml(service.category)}</div><div>${money(service.price)}</div><div>${service.maxKg} kg</div><div>${escapeHtml(service.includes.join(', ') || 'none')}</div><div>${service.isActive ? 'Active' : 'Inactive'}</div><div class="row-actions"><button class="secondary edit-service-btn" data-id="${service.id}">Edit</button>${service.isActive ? `<button class="secondary deactivate-service-btn" data-id="${service.id}">Deactivate</button>` : `<button class="secondary activate-service-btn" data-id="${service.id}">Activate</button>`}</div></div>`).join('') || '<div class="helper">No order services yet.</div>'}
+          </div>
         </div>
         <div class="section-divider"></div>
-        <div class="table daily-report-table">
-          <div class="table-head"><div>Name</div><div>Max KG</div><div></div><div></div><div></div></div>
-          ${categories.map((category) => `<div class="table-row"><div>${escapeHtml(category.name)}</div><div>${category.maxKg}</div><div></div><div></div><div></div></div>`).join('')}
+        ${sectionTitle('Extra Services Table', 'Add-on services')}
+        <div class="table-scroll">
+          <div class="table data-table">
+            <div class="table-head"><div>Name</div><div>Category</div><div>Price</div><div>Includes</div><div>Status</div><div>Actions</div></div>
+            ${addonServices.map((service) => `<div class="table-row"><div><strong>${escapeHtml(service.name)}</strong></div><div>${escapeHtml(service.category)}</div><div>${money(service.price)}</div><div>${escapeHtml(service.includes.join(', ') || 'none')}</div><div>${service.isActive ? 'Active' : 'Inactive'}</div><div class="row-actions"><button class="secondary edit-service-btn" data-id="${service.id}">Edit</button>${service.isActive ? `<button class="secondary deactivate-service-btn" data-id="${service.id}">Deactivate</button>` : `<button class="secondary activate-service-btn" data-id="${service.id}">Activate</button>`}</div></div>`).join('') || '<div class="helper">No extra services yet.</div>'}
+          </div>
         </div>
       </article>
     </section>
@@ -1562,13 +1554,15 @@ function renderStaff(staff: Staff[], branch: string) {
 
       <article class="panel">
         ${sectionTitle('Staff list', 'Branch: ' + escapeHtml(branch))}
-        <div class="table">
-          <div class="table-head staff-table-head"><div>Name</div><div>Email</div><div>Role</div><div>Branch</div><div>Status</div><div>Actions</div></div>
-          ${staff.length ? staff.map((person) => `<div class="table-row staff-table-row"><div><strong>${escapeHtml(person.name)}</strong></div><div>${escapeHtml(person.email)}</div><div class="small">${escapeHtml(person.role)}</div><div>${escapeHtml(person.branch)}</div><div>${person.isActive !== 0 ? 'Active' : 'Inactive'}</div>
-          <div class="row-actions">
-            <button class="secondary edit-staff-btn" data-id="${person.id}">Edit</button>
-            ${person.isActive !== 0 ? `<button class="secondary deactivate-staff-btn" data-id="${person.id}">Deactivate</button>` : `<button class="secondary activate-staff-btn" data-id="${person.id}">Activate</button>`}
-          </div></div>`).join('') : '<div class="helper" style="padding:18px 0">No staff records yet. Click <strong>+ Add staff</strong> to create one.</div>'}
+        <div class="table-scroll">
+          <div class="table data-table">
+            <div class="table-head"><div>Name</div><div>Email</div><div>Role</div><div>Branch</div><div>Status</div><div>Actions</div></div>
+            ${staff.length ? staff.map((person) => `<div class="table-row"><div><strong>${escapeHtml(person.name)}</strong></div><div>${escapeHtml(person.email)}</div><div>${escapeHtml(person.role)}</div><div>${escapeHtml(person.branch)}</div><div>${person.isActive !== 0 ? 'Active' : 'Inactive'}</div>
+            <div class="row-actions">
+              <button class="secondary edit-staff-btn" data-id="${person.id}">Edit</button>
+              ${person.isActive !== 0 ? `<button class="secondary deactivate-staff-btn" data-id="${person.id}">Deactivate</button>` : `<button class="secondary activate-staff-btn" data-id="${person.id}">Activate</button>`}
+            </div></div>`).join('') : '<div class="helper" style="padding:18px 0">No staff records yet. Click <strong>+ Add staff</strong> to create one.</div>'}
+          </div>
         </div>
       </article>
     </section>
@@ -1615,7 +1609,6 @@ function renderSettings(branch: string, foldRate: number, reportEmail: string) {
           <label>Current branch<select name="branch">
             ${['Main Store', 'Mintal Branch', 'Gensan Branch'].map((item) => `<option value="${item}" ${item === branch ? 'selected' : ''}>${item}</option>`).join('')}
           </select></label>
-          <label>Fold rate<input name="foldRate" type="number" min="0" step="0.01" value="${foldRate}" /></label>
           <label>Report email<input name="reportEmail" type="email" placeholder="admin@laba101.test" value="${escapeHtml(reportEmail)}" /></label>
           <button class="primary" type="submit">Save settings</button>
         </form>
