@@ -223,6 +223,33 @@ function orderPaymentStatus(order: Pick<OrderRow, 'paidAmount' | 'balance'>) {
   return order.paidAmount <= 0 ? 'unpaid' : order.balance > 0 ? 'partial' : 'paid';
 }
 
+function cappedPaymentTotals(payments: Payment[], orders: OrderRow[], shouldInclude: (payment: Payment) => boolean) {
+  const orderById = new Map(orders.map((order) => [order.id, order]));
+  const remainingByOrder = new Map(orders.map((order) => [order.id, Number(order.totalAmount || 0)]));
+  const totals = { cash: 0, gcash: 0, total: 0 };
+
+  [...payments]
+    .sort((a, b) => new Date(a.receivedAt).getTime() - new Date(b.receivedAt).getTime() || a.id - b.id)
+    .forEach((payment) => {
+      const order = orderById.get(payment.orderId);
+      if (!order) return;
+      const remaining = remainingByOrder.get(order.id) ?? 0;
+      const appliedAmount = Math.min(Math.max(0, Number(payment.amount || 0)), remaining);
+      remainingByOrder.set(order.id, Number((remaining - appliedAmount).toFixed(2)));
+      if (!shouldInclude(payment) || appliedAmount <= 0) return;
+
+      if (payment.method === 'gcash') totals.gcash += appliedAmount;
+      else totals.cash += appliedAmount;
+      totals.total += appliedAmount;
+    });
+
+  return {
+    cash: Number(totals.cash.toFixed(2)),
+    gcash: Number(totals.gcash.toFixed(2)),
+    total: Number(totals.total.toFixed(2)),
+  };
+}
+
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-PH', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
 }
@@ -517,13 +544,14 @@ async function render() {
   const readyPickup = data.orders.filter((order) => order.status === 'ready').length;
   const orderSales = data.orders.reduce((sum, order) => sum + order.paidAmount, 0);
   const todayValue = today();
-  const gcashPaidToday = data.payments
-    .filter((payment) => payment.branch === data.branch && payment.method === 'gcash' && localDateFromIso(payment.receivedAt) === todayValue)
-    .reduce((sum, payment) => sum + payment.amount, 0)
+  const posPaidToday = cappedPaymentTotals(
+    data.payments,
+    data.orders,
+    (payment) => payment.branch === data.branch && localDateFromIso(payment.receivedAt) === todayValue,
+  );
+  const gcashPaidToday = posPaidToday.gcash
     + data.sales.filter((sale) => sale.saleDate === todayValue).reduce((sum, sale) => sum + sale.gcashAmount, 0);
-  const cashPaidToday = data.payments
-    .filter((payment) => payment.branch === data.branch && payment.method === 'cash' && localDateFromIso(payment.receivedAt) === todayValue)
-    .reduce((sum, payment) => sum + payment.amount, 0)
+  const cashPaidToday = posPaidToday.cash
     + data.sales.filter((sale) => sale.saleDate === todayValue).reduce((sum, sale) => sum + sale.cashAmount, 0);
   const paidToday = cashPaidToday + gcashPaidToday;
   const disbursementToday = data.expenses.filter((expense) => expense.expenseDate === todayValue).reduce((sum, expense) => sum + expense.amount, 0);
@@ -678,9 +706,11 @@ function renderDashboard(metrics: { paidToday: number; cashPaidToday: number; gc
     const date = new Date(now);
     date.setDate(now.getDate() - (6 - index));
     const key = localDateInput(date);
-    const posPaid = metrics.orders
-      .filter((order) => localDateFromIso(order.createdAt) === key)
-      .reduce((sum, order) => sum + order.paidAmount, 0);
+    const posPaid = cappedPaymentTotals(
+      metrics.payments,
+      metrics.orders,
+      (payment) => localDateFromIso(payment.receivedAt) === key,
+    ).total;
     const manualPaid = metrics.sales
       .filter((sale) => sale.saleDate === key)
       .reduce((sum, sale) => sum + sale.totalAmount, 0);
@@ -898,7 +928,6 @@ function renderOrderRow(order: OrderRow, staff: Staff[], services: LaundryServic
   const needsFoldStaff = nextStep?.key === 'fold';
   const needsExtraConfirmation = nextStep?.key === 'extras' && order.extras.length > 0;
   const paymentStatus = orderPaymentStatus(order);
-  const paymentStatusLabel = paymentStatus.charAt(0).toUpperCase() + paymentStatus.slice(1);
   const paymentClass = paymentStatus === 'paid' ? 'ok' : paymentStatus === 'partial' ? 'warn' : 'meta';
   const extrasLabel = order.extras.length
     ? order.extras.map((extra) => `${escapeHtml(cleanAddonName(extra.name))} x${Number(extra.quantity ?? 1)}`).join(', ')
@@ -911,7 +940,7 @@ function renderOrderRow(order: OrderRow, staff: Staff[], services: LaundryServic
       <td><strong>${escapeHtml(order.ticket)}</strong><div class="small">${escapeHtml(formatDate(order.createdAt))}</div></td>
       <td>${escapeHtml(order.customer)}<div class="small">${escapeHtml(order.phone ?? '')}</div></td>
       <td>${escapeHtml(order.service)}${extrasLabel ? `<div class="small">Extras: ${extrasLabel}</div>` : ''}</td>
-      <td class="amount-cell"><strong>${money(order.totalAmount)}</strong><div class="small">${escapeHtml(paymentStatusLabel)} · Paid ${money(order.paidAmount)} · Bal PHP ***</div></td>
+      <td class="amount-cell"><strong>${money(order.totalAmount)}(${escapeHtml(paymentStatus)})</strong><div class="small">Paid: ${money(order.paidAmount)}, Bal: ${money(order.balance)}</div></td>
       <td>
       <div class="row-actions">
         ${nextStep ? `<form class="inline-form advance-form" data-order-id="${order.id}">
@@ -1918,7 +1947,7 @@ function bindOrderForms(data: Awaited<ReturnType<typeof loadData>>) {
     const totalPreview = calculatePricing(selectedServices, category, defaultWeightForService(primaryService, category), addons);
     if (!confirm(`Save this order?\n\nServices: ${selectedServiceLabels}\nTotal: ${money(totalPreview.totalAmount)}`)) return;
     try {
-      await createOrder({
+      const order = await createOrder({
         customerId: Number(fd.get('customerId')) || undefined,
         customerName: String(fd.get('customerName') ?? ''),
         customerPhone: String(fd.get('customerPhone') ?? '') || null,
@@ -1932,6 +1961,7 @@ function bindOrderForms(data: Awaited<ReturnType<typeof loadData>>) {
         paymentReference: String(fd.get('paymentReference') ?? '') || null,
         notes: String(fd.get('notes') ?? '') || null,
       });
+      state.receiptOrderId = order.id;
       await render();
     } catch (error) {
       if (orderError) {
