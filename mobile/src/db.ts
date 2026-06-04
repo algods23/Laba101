@@ -102,6 +102,7 @@ export type DisbursementExpense = {
   id: number;
   expenseDate: string;
   number: string;
+  disbursementType?: 'daily' | 'monthly';
   name: string;
   category: string;
   description: string | null;
@@ -541,7 +542,7 @@ async function ensureSchema() {
       branch TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS fold_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, orderTicket TEXT NOT NULL, staffName TEXT NOT NULL, foldCount INTEGER NOT NULL, rate REAL NOT NULL, total REAL NOT NULL, createdAt TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS disbursement_expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, expenseDate TEXT NOT NULL, number TEXT NOT NULL, name TEXT NOT NULL, category TEXT NOT NULL, description TEXT, amount REAL NOT NULL);
+    CREATE TABLE IF NOT EXISTS disbursement_expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, expenseDate TEXT NOT NULL, number TEXT NOT NULL, disbursementType TEXT NOT NULL DEFAULT 'daily', name TEXT NOT NULL, category TEXT NOT NULL, description TEXT, amount REAL NOT NULL);
     CREATE TABLE IF NOT EXISTS daily_sales (id INTEGER PRIMARY KEY AUTOINCREMENT, saleDate TEXT NOT NULL, saleNumber TEXT, cashAmount REAL NOT NULL, gcashAmount REAL NOT NULL, totalAmount REAL NOT NULL, notes TEXT);
     CREATE TABLE IF NOT EXISTS revolving_history (id INTEGER PRIMARY KEY AUTOINCREMENT, revolvingNumber TEXT NOT NULL, name TEXT NOT NULL, amount REAL NOT NULL, category TEXT NOT NULL, description TEXT, type TEXT NOT NULL, createdAt TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS machines (id INTEGER PRIMARY KEY AUTOINCREMENT, machineName TEXT NOT NULL, machineType TEXT NOT NULL, status TEXT NOT NULL, branch TEXT NOT NULL);
@@ -576,6 +577,7 @@ async function ensureSchema() {
   await addColumnIfMissing(db, 'daily_sales', 'status', 'TEXT');
   await addColumnIfMissing(db, 'daily_sales', 'endorsedTo', 'TEXT');
   await addColumnIfMissing(db, 'daily_sales', 'statusUpdatedAt', 'TEXT');
+  await addColumnIfMissing(db, 'disbursement_expenses', 'disbursementType', 'TEXT NOT NULL DEFAULT "daily"');
 
   const staffCount = await db.query('SELECT COUNT(*) as count FROM staff');
   const isFreshInstall = ((staffCount.values?.[0] as { count: number } | undefined)?.count ?? 0) === 0;
@@ -586,7 +588,7 @@ async function ensureSchema() {
     for (const category of seedItemCategories) await db.run('INSERT INTO item_categories (id, name, maxKg, additionalFee, isActive) VALUES (?, ?, ?, ?, ?)', [category.id, category.name, category.maxKg, category.additionalFee, category.isActive]);
     for (const order of seedOrders) await insertNativeOrder(db, order);
     for (const payment of seedPayments) await db.run('INSERT INTO payments (id, orderId, amount, method, reference, receivedAt, branch) VALUES (?, ?, ?, ?, ?, ?, ?)', [payment.id, payment.orderId, payment.amount, payment.method, payment.reference, payment.receivedAt, payment.branch]);
-    for (const expense of seedExpenses) await db.run('INSERT INTO disbursement_expenses (id, expenseDate, number, name, category, description, amount) VALUES (?, ?, ?, ?, ?, ?, ?)', [expense.id, expense.expenseDate, expense.number, expense.name, expense.category, expense.description, expense.amount]);
+    for (const expense of seedExpenses) await db.run('INSERT INTO disbursement_expenses (id, expenseDate, number, disbursementType, name, category, description, amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [expense.id, expense.expenseDate, expense.number, expense.disbursementType ?? 'daily', expense.name, expense.category, expense.description, expense.amount]);
     for (const sale of seedSales) await db.run('INSERT INTO daily_sales (id, saleDate, saleNumber, cashAmount, gcashAmount, totalAmount, notes) VALUES (?, ?, ?, ?, ?, ?, ?)', [sale.id, sale.saleDate, sale.saleNumber, sale.cashAmount, sale.gcashAmount, sale.totalAmount, sale.notes]);
     for (const rh of seedRevolvingHistory) await db.run('INSERT INTO revolving_history (id, revolvingNumber, name, amount, category, description, type, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [rh.id, rh.revolvingNumber, rh.name, rh.amount, rh.category, rh.description, rh.type, rh.createdAt]);
     for (const machine of seedMachines) await db.run('INSERT INTO machines (id, machineName, machineType, status, branch) VALUES (?, ?, ?, ?, ?)', [machine.id, machine.machineName, machine.machineType, machine.status, machine.branch]);
@@ -1130,9 +1132,9 @@ export async function createFoldLog(input: { orderTicket: string; staffName: str
 }
 
 export async function listExpenses(): Promise<DisbursementExpense[]> {
-  if (!Capacitor.isNativePlatform()) return readBrowser<DisbursementExpense[]>('expenses', seedExpenses);
+  if (!Capacitor.isNativePlatform()) return readBrowser<DisbursementExpense[]>('expenses', seedExpenses).map((expense) => ({ ...expense, disbursementType: expense.disbursementType ?? 'daily' }));
   const db = await ensureNativeDb();
-  const result = await db.query('SELECT id, expenseDate, number, name, category, description, amount FROM disbursement_expenses ORDER BY expenseDate DESC, id DESC');
+  const result = await db.query('SELECT id, expenseDate, number, COALESCE(disbursementType, "daily") as disbursementType, name, category, description, amount FROM disbursement_expenses ORDER BY expenseDate DESC, id DESC');
   return (result.values ?? []) as DisbursementExpense[];
 }
 
@@ -1188,7 +1190,7 @@ async function nextRevolvingAddNumber() {
   return `REV-${String(max + 1).padStart(2, '0')}`;
 }
 
-async function insertExpenseRecord(input: { expenseDate: string; number: string; name: string; category: string; description: string; amount: number }) {
+async function insertExpenseRecord(input: { expenseDate: string; number: string; disbursementType?: 'daily' | 'monthly'; name: string; category: string; description: string; amount: number }) {
   if (!Capacitor.isNativePlatform()) {
     const items = readBrowser<DisbursementExpense[]>('expenses', seedExpenses);
     const id = nextNumericId(items);
@@ -1196,6 +1198,7 @@ async function insertExpenseRecord(input: { expenseDate: string; number: string;
       id,
       expenseDate: input.expenseDate,
       number: input.number,
+      disbursementType: input.disbursementType ?? 'daily',
       name: input.name,
       category: input.category,
       description: input.description || null,
@@ -1206,16 +1209,17 @@ async function insertExpenseRecord(input: { expenseDate: string; number: string;
   }
   const db = await ensureNativeDb();
   await db.run(
-    'INSERT INTO disbursement_expenses (expenseDate, number, name, category, description, amount) VALUES (?, ?, ?, ?, ?, ?)',
-    [input.expenseDate, input.number, input.name, input.category, input.description || null, input.amount],
+    'INSERT INTO disbursement_expenses (expenseDate, number, disbursementType, name, category, description, amount) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [input.expenseDate, input.number, input.disbursementType ?? 'daily', input.name, input.category, input.description || null, input.amount],
   );
 }
 
-export async function createExpense(input: { expenseDate: string; name: string; category: string; description: string; amount: number }) {
+export async function createExpense(input: { expenseDate: string; disbursementType?: 'daily' | 'monthly'; name: string; category: string; description: string; amount: number }) {
   const number = await nextDisbursementNumber();
   await insertExpenseRecord({
     expenseDate: input.expenseDate,
     number,
+    disbursementType: input.disbursementType ?? 'daily',
     name: input.name,
     category: input.category,
     description: input.description,
@@ -1223,13 +1227,14 @@ export async function createExpense(input: { expenseDate: string; name: string; 
   });
 }
 
-export async function updateExpense(id: number, input: { expenseDate: string; name: string; category: string; description: string; amount: number }) {
+export async function updateExpense(id: number, input: { expenseDate: string; disbursementType?: 'daily' | 'monthly'; name: string; category: string; description: string; amount: number }) {
   if (!Capacitor.isNativePlatform()) {
     const items = readBrowser<DisbursementExpense[]>('expenses', seedExpenses);
     const existing = items.find((item) => item.id === id);
     if (existing) {
       Object.assign(existing, {
         expenseDate: input.expenseDate,
+        disbursementType: input.disbursementType ?? 'daily',
         name: input.name,
         category: input.category,
         description: input.description || null,
@@ -1241,8 +1246,8 @@ export async function updateExpense(id: number, input: { expenseDate: string; na
   }
   const db = await ensureNativeDb();
   await db.run(
-    'UPDATE disbursement_expenses SET expenseDate = ?, name = ?, category = ?, description = ?, amount = ? WHERE id = ?',
-    [input.expenseDate, input.name, input.category, input.description || null, input.amount, id],
+    'UPDATE disbursement_expenses SET expenseDate = ?, disbursementType = ?, name = ?, category = ?, description = ?, amount = ? WHERE id = ?',
+    [input.expenseDate, input.disbursementType ?? 'daily', input.name, input.category, input.description || null, input.amount, id],
   );
 }
 

@@ -156,6 +156,7 @@ const state = {
 };
 
 const serviceIncludeOptions = ['Wash', 'Dry', 'Fold', 'Detergent', 'Fabcon', 'Zonrox'] as const;
+const disbursementCategories = ['Supplies', 'Utilities', 'Maintenance', 'Salary', 'Rent', 'Transport', 'Other'];
 
 const sessionKey = 'laba101-mobile-session';
 
@@ -186,7 +187,7 @@ function computeCashOnHandForDate(date: string, orders: OrderRow[], expenses: Di
     .filter((order) => localDateFromIso(order.createdAt) === date)
     .reduce((sum, order) => sum + order.paidAmount, 0);
   const dayDisbursements = expenses
-    .filter((expense) => expense.expenseDate === date)
+    .filter((expense) => expenseType(expense) === 'daily' && expense.expenseDate === date)
     .reduce((sum, expense) => sum + expense.amount, 0);
   return computeCashOnHand(orderCash + manualCashAmount, dayDisbursements);
 }
@@ -213,6 +214,22 @@ function localDateInput(date = new Date()) {
 
 function today() {
   return localDateInput();
+}
+
+function currentMonthInput() {
+  return today().slice(0, 7);
+}
+
+function expenseType(expense: DisbursementExpense) {
+  return expense.disbursementType === 'monthly' ? 'monthly' : 'daily';
+}
+
+function expenseMonthValue(expenseDate: string) {
+  return expenseDate.slice(0, 7);
+}
+
+function expenseDateLabel(expense: DisbursementExpense) {
+  return expenseType(expense) === 'monthly' ? expenseMonthValue(expense.expenseDate) : expense.expenseDate;
 }
 
 function localDateFromIso(value: string) {
@@ -395,10 +412,10 @@ function buildReportData(orders: OrderRow[], payments: Payment[], sales: DailySa
     totalExpenses,
     totalDisbursement,
     rows: [
-      ['Date', 'id#', 'Name', 'Category', 'Description', 'Amount'],
-      ...filteredExpenses.map((expense) => [expense.expenseDate, expense.number, expense.name, expense.category ?? '', expense.description ?? '', expense.amount]),
+      ['Date/Month', 'id#', 'Type', 'Name', 'Category', 'Description', 'Amount'],
+      ...filteredExpenses.map((expense) => [expenseDateLabel(expense), expense.number, expenseType(expense), expense.name, expense.category ?? '', expense.description ?? '', expense.amount]),
       [],
-      ['Total Disbursement', '', '', '', '', totalDisbursement],
+      ['Total Disbursement', '', '', '', '', '', totalDisbursement],
     ],
   });
 
@@ -554,7 +571,7 @@ async function render() {
   const cashPaidToday = posPaidToday.cash
     + data.sales.filter((sale) => sale.saleDate === todayValue).reduce((sum, sale) => sum + sale.cashAmount, 0);
   const paidToday = cashPaidToday + gcashPaidToday;
-  const disbursementToday = data.expenses.filter((expense) => expense.expenseDate === todayValue).reduce((sum, expense) => sum + expense.amount, 0);
+  const disbursementToday = data.expenses.filter((expense) => expenseType(expense) === 'daily' && expense.expenseDate === todayValue).reduce((sum, expense) => sum + expense.amount, 0);
   const cashOnHandToday = computeCashOnHand(cashPaidToday, disbursementToday);
   const manualSales = data.sales.reduce((sum, sale) => sum + sale.totalAmount, 0);
   const salesTotal = orderSales + manualSales;
@@ -1269,8 +1286,9 @@ function renderDisbursements(expenses: DisbursementExpense[], sales: DailySale[]
   const todayValue = today();
   const monthValue = todayValue.slice(0, 7);
   const isAdmin = state.currentUser?.role === 'admin';
-  const dailyExpense = expenses.filter((item) => item.expenseDate === todayValue).reduce((sum, item) => sum + item.amount, 0);
-  const monthlyExpense = expenses.filter((item) => item.expenseDate.startsWith(monthValue)).reduce((sum, item) => sum + item.amount, 0);
+  const expenseCategoryOptions = Array.from(new Set([...disbursementCategories, ...expenses.map((expense) => expense.category).filter(Boolean)]));
+  const dailyExpense = expenses.filter((item) => expenseType(item) === 'daily' && item.expenseDate === todayValue).reduce((sum, item) => sum + item.amount, 0);
+  const monthlyExpense = expenses.filter((item) => expenseType(item) === 'monthly' && item.expenseDate.startsWith(monthValue)).reduce((sum, item) => sum + item.amount, 0);
   const todaysManualSales = sales.filter((item) => item.saleDate === todayValue).reduce((sum, item) => sum + item.totalAmount, 0);
   const monthlyManualSales = sales.filter((item) => item.saleDate.startsWith(monthValue)).reduce((sum, item) => sum + item.totalAmount, 0);
   return `
@@ -1295,8 +1313,19 @@ function renderDisbursements(expenses: DisbursementExpense[], sales: DailySale[]
         ${sectionTitle('Input disbursement', 'Supplies, utilities, and cash disbursements')}
         <form id="expense-form" class="form">
           <input name="id" type="hidden" />
-          <div class="form-row"><label>Date<input name="expenseDate" type="date" value="${today()}" required /></label><label>Amount<input name="amount" type="number" min="0" step="0.01" required /></label></div>
-          <div class="form-row"><label>Name<input name="name" required /></label><label>Category<input name="category" required /></label></div>
+          <label>Disbursement Type
+            <div class="segmented disbursement-type-toggle">
+              <button class="is-active" data-expense-type="daily" type="button">Daily</button>
+              <button data-expense-type="monthly" type="button">Monthly</button>
+            </div>
+            <input name="disbursementType" type="hidden" value="daily" />
+          </label>
+          <div class="form-row">
+            <label class="expense-date-field">Date<input name="expenseDate" type="date" value="${today()}" required /></label>
+            <label class="expense-month-field" hidden>Month<input name="expenseMonth" type="month" value="${currentMonthInput()}" /></label>
+            <label>Amount<input name="amount" type="number" min="0" step="0.01" required placeholder="0.00" /></label>
+          </div>
+          <div class="form-row"><label>Title / Name<input name="name" required /></label><label>Category<select name="category" required>${expenseCategoryOptions.map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`).join('')}</select></label></div>
           <label>Description<textarea name="description"></textarea></label>
           <button class="primary" type="submit">Save expense</button>
         </form>
@@ -1305,8 +1334,8 @@ function renderDisbursements(expenses: DisbursementExpense[], sales: DailySale[]
         ${sectionTitle('Disbursement list', 'Expenses only')}
         <div class="table-scroll daily-report-scroll">
           <div class="table daily-report-table">
-            <div class="table-head"><div>Date</div><div>No.</div><div>Name</div><div>Category</div><div>Amount</div><div>Action</div></div>
-            ${expenses.map((item) => `<div class="table-row"><div>${escapeHtml(item.expenseDate)}</div><div>${escapeHtml(item.number)}</div><div>${escapeHtml(item.name)}</div><div>${escapeHtml(item.category)}</div><div>${money(item.amount)}</div><div class="row-actions"><button class="secondary edit-expense-btn" data-id="${item.id}" type="button">Edit</button>${isAdmin ? `<button class="secondary delete-expense-btn" data-id="${item.id}" type="button">Delete</button>` : ''}</div></div>`).join('') || '<div class="helper">No expenses yet.</div>'}
+            <div class="table-head"><div>Date/Month</div><div>No.</div><div>Name</div><div>Category</div><div>Amount</div><div>Action</div></div>
+            ${expenses.map((item) => `<div class="table-row"><div>${escapeHtml(expenseDateLabel(item))}<div class="small">${escapeHtml(expenseType(item))}</div></div><div>${escapeHtml(item.number)}</div><div>${escapeHtml(item.name)}</div><div>${escapeHtml(item.category)}</div><div>${money(item.amount)}</div><div class="row-actions"><button class="secondary edit-expense-btn" data-id="${item.id}" type="button">Edit</button>${isAdmin ? `<button class="secondary delete-expense-btn" data-id="${item.id}" type="button">Delete</button>` : ''}</div></div>`).join('') || '<div class="helper">No expenses yet.</div>'}
           </div>
         </div>
       </article>
@@ -1412,8 +1441,8 @@ function renderReports(orders: OrderRow[], payments: Payment[], sales: DailySale
           <article>
             ${sectionTitle('Disbursement preview', `${preview.selection.from} to ${preview.selection.to}`)}
             <div class="table wide-table report-preview-table report-disbursement-table">
-              <div class="table-head report-table-head"><div>ID#</div><div>Date</div><div>Name</div><div>Category</div><div>Amount</div></div>
-              ${preview.disbursementRows().rows.slice(1).filter((row) => row.length && row[0] !== 'Total Disbursement').map((row) => `<div class="table-row report-table-row"><div>${escapeHtml(row[1] ?? '')}</div><div>${escapeHtml(row[0] ?? '')}</div><div>${escapeHtml(row[2] ?? '')}</div><div>${escapeHtml(row[3] ?? '')}</div><div>${money(row[5] as number)}</div></div>`).join('')}
+              <div class="table-head report-table-head"><div>ID#</div><div>Date/Month</div><div>Type</div><div>Name</div><div>Category</div><div>Amount</div></div>
+              ${preview.disbursementRows().rows.slice(1).filter((row) => row.length && row[0] !== 'Total Disbursement').map((row) => `<div class="table-row report-table-row"><div>${escapeHtml(row[1] ?? '')}</div><div>${escapeHtml(row[0] ?? '')}</div><div>${escapeHtml(row[2] ?? '')}</div><div>${escapeHtml(row[3] ?? '')}</div><div>${escapeHtml(row[4] ?? '')}</div><div>${money(row[6] as number)}</div></div>`).join('')}
             </div>
             <div class="disbursement-total">
               <strong>Total Disbursement: ${money(preview.disbursementRows().totalDisbursement)}</strong>
@@ -2116,11 +2145,42 @@ function bindPricingForms(services: LaundryService[]) {
 
 function bindDisbursementForms(expenses: DisbursementExpense[]) {
   const expenseForm = document.querySelector<HTMLFormElement>('#expense-form');
+  const expenseTypeInput = expenseForm?.querySelector<HTMLInputElement>('input[name="disbursementType"]');
+  const expenseDateField = expenseForm?.querySelector<HTMLElement>('.expense-date-field');
+  const expenseMonthField = expenseForm?.querySelector<HTMLElement>('.expense-month-field');
+  const expenseDateInput = expenseForm?.querySelector<HTMLInputElement>('input[name="expenseDate"]');
+  const expenseMonthInput = expenseForm?.querySelector<HTMLInputElement>('input[name="expenseMonth"]');
+  const setExpenseType = (type: 'daily' | 'monthly') => {
+    if (!expenseForm || !expenseTypeInput || !expenseDateInput || !expenseMonthInput) return;
+    expenseTypeInput.value = type;
+    expenseForm.querySelectorAll<HTMLButtonElement>('[data-expense-type]').forEach((button) => {
+      button.classList.toggle('is-active', button.dataset.expenseType === type);
+    });
+    if (expenseDateField) expenseDateField.hidden = type === 'monthly';
+    if (expenseMonthField) expenseMonthField.hidden = type !== 'monthly';
+    expenseDateInput.required = type === 'daily';
+    expenseMonthInput.required = type === 'monthly';
+    if (type === 'monthly' && !expenseMonthInput.value) expenseMonthInput.value = currentMonthInput();
+    if (type === 'daily' && !expenseDateInput.value) expenseDateInput.value = today();
+  };
+  expenseForm?.querySelectorAll<HTMLButtonElement>('[data-expense-type]').forEach((button) => {
+    button.addEventListener('click', () => setExpenseType(button.dataset.expenseType === 'monthly' ? 'monthly' : 'daily'));
+  });
+  setExpenseType('daily');
   expenseForm?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const fd = new FormData(event.currentTarget);
     const id = Number(fd.get('id') || 0);
-    const input = { expenseDate: String(fd.get('expenseDate') ?? ''), name: String(fd.get('name') ?? ''), category: String(fd.get('category') ?? ''), description: String(fd.get('description') ?? ''), amount: Number(fd.get('amount') ?? 0) };
+    const disbursementType = String(fd.get('disbursementType') ?? 'daily') === 'monthly' ? 'monthly' : 'daily';
+    const monthValue = String(fd.get('expenseMonth') ?? currentMonthInput());
+    const input = {
+      expenseDate: disbursementType === 'monthly' ? `${monthValue}-01` : String(fd.get('expenseDate') ?? ''),
+      disbursementType,
+      name: String(fd.get('name') ?? ''),
+      category: String(fd.get('category') ?? ''),
+      description: String(fd.get('description') ?? ''),
+      amount: Number(fd.get('amount') ?? 0),
+    };
     if (id) await updateExpense(id, input);
     else await createExpense(input);
     await render();
@@ -2131,9 +2191,11 @@ function bindDisbursementForms(expenses: DisbursementExpense[]) {
       if (!expense || !expenseForm) return;
       (expenseForm.querySelector('[name=id]') as HTMLInputElement).value = String(expense.id);
       (expenseForm.querySelector('[name=expenseDate]') as HTMLInputElement).value = expense.expenseDate;
+      (expenseForm.querySelector('[name=expenseMonth]') as HTMLInputElement).value = expenseMonthValue(expense.expenseDate);
+      setExpenseType(expenseType(expense));
       (expenseForm.querySelector('[name=amount]') as HTMLInputElement).value = String(expense.amount);
       (expenseForm.querySelector('[name=name]') as HTMLInputElement).value = expense.name;
-      (expenseForm.querySelector('[name=category]') as HTMLInputElement).value = expense.category;
+      (expenseForm.querySelector('[name=category]') as HTMLSelectElement).value = expense.category;
       (expenseForm.querySelector('[name=description]') as HTMLTextAreaElement).value = expense.description ?? '';
       const submitButton = expenseForm.querySelector<HTMLButtonElement>('button[type="submit"]');
       if (submitButton) submitButton.textContent = 'Update expense';
@@ -2222,7 +2284,7 @@ function bindReportActions(orders: OrderRow[], payments: Payment[], sales: Daily
       }
 
       if (sheetName === 'Disbursement') {
-        return [110, 115, 150, 220, 105];
+        return [115, 115, 90, 150, 150, 220, 105];
       }
 
       if (sheetName === 'Fold Count') {
@@ -2245,7 +2307,7 @@ function bindReportActions(orders: OrderRow[], payments: Payment[], sales: Daily
         .join('');
       const rowXml = sheet.rows.map((row) => {
         if (!row.length) return '<Row ss:Height="10" ss:StyleID="BorderRow"><Cell ss:StyleID="BorderCell"><Data ss:Type="String">&nbsp;</Data></Cell></Row>';
-        const isHeaderRow = row[0] === 'Type' || row[0] === 'Summary' || row[0] === 'Sales Summary' || row[0] === 'Disbursement Summary' || row[0] === 'Staff' || row[0] === 'Date of Sales' || row[0] === 'Date';
+        const isHeaderRow = row[0] === 'Type' || row[0] === 'Summary' || row[0] === 'Sales Summary' || row[0] === 'Disbursement Summary' || row[0] === 'Staff' || row[0] === 'Date of Sales' || row[0] === 'Date' || row[0] === 'Date/Month';
         const rowStyle = isHeaderRow ? 'HeaderRow' : 'BorderRow';
         const cellStyle = isHeaderRow ? 'HeaderCell' : 'BorderCell';
         const rowHeight = isHeaderRow ? 26 : 22;
