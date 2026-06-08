@@ -143,6 +143,7 @@ const state = {
   pairedPrinters: [] as BluetoothPrinter[],
   selectedPrinterAddress: '',
   archivedOrderSearch: '',
+  paymentModalOrderId: 0,
   reportPreview: null as ReportPreviewState | null,
   endorseModalOpen: false,
   endorseSaleId: 0,
@@ -913,6 +914,7 @@ function renderOrders(orders: OrderRow[], staff: Staff[], services: LaundryServi
         </div>
       </article>
       ${receipt ? renderReceipt(receipt, payments.filter((payment) => payment.orderId === receipt.id)) : ''}
+      ${state.paymentModalOrderId ? renderPaymentModal(orders.find(o => o.id === state.paymentModalOrderId)) : ''}
     </section>
   `;
 }
@@ -1000,7 +1002,7 @@ function renderOrderRow(order: OrderRow, staff: Staff[], services: LaundryServic
             ${staff.map((person) => `<option value="${person.id}">${escapeHtml(person.name)}</option>`).join('')}
           </select>`).join('') : ''}
           <button class="secondary" type="submit">Fold</button>
-        </form>` : !claimedDone ? `<form class="inline-form advance-form" data-order-id="${order.id}">
+        </form>` : !claimedDone ? `<form class="inline-form advance-form" data-order-id="${order.id}" data-action="claim" data-balance="${order.balance}">
           <button class="secondary" type="submit">Claim</button>
         </form>` : ''}
         ${order.balance > 0 ? `
@@ -1027,6 +1029,38 @@ function renderOrderRow(order: OrderRow, staff: Staff[], services: LaundryServic
         </div>
       </td>
     </tr>
+  `;
+}
+
+function renderPaymentModal(order: OrderRow | undefined) {
+  if (!order) return '';
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <div class="receipt-modal" role="dialog" aria-modal="true" aria-labelledby="payment-title">
+        <div class="modal-actions">
+          <button class="secondary" type="button" data-close-payment-modal>Close</button>
+        </div>
+        <div class="receipt" style="border: 1px solid var(--line); border-style: solid; box-shadow: none;">
+          <h3 id="payment-title" style="margin-top:0">Payment Required</h3>
+          <p>Please settle the remaining balance of <strong>${money(order.balance)}</strong> for ticket <strong>${escapeHtml(order.ticket)}</strong> before claiming.</p>
+          <form class="claim-payment-form" style="display:flex; flex-direction:column; gap:8px;" data-order-id="${order.id}">
+            <label style="display:flex; flex-direction:column; gap:4px; font-weight:bold;">Amount to Pay
+              <input name="amount" type="number" min="${order.balance}" step="0.01" value="${order.balance}" required />
+            </label>
+            <label style="display:flex; flex-direction:column; gap:4px; font-weight:bold;">Payment Method
+              <select name="method">
+                <option value="cash">Cash</option>
+                <option value="gcash">GCash</option>
+              </select>
+            </label>
+            <label style="display:flex; flex-direction:column; gap:4px; font-weight:bold;" hidden>GCash Reference
+              <input name="reference" placeholder="Required for GCash" />
+            </label>
+            <button class="primary" type="submit" style="margin-top:8px">Pay & Claim</button>
+          </form>
+        </div>
+      </div>
+    </div>
   `;
 }
 
@@ -2102,10 +2136,58 @@ function bindOrderForms(data: Awaited<ReturnType<typeof loadData>>) {
   document.querySelectorAll<HTMLFormElement>('.advance-form').forEach((advanceForm) => {
     advanceForm.addEventListener('submit', async (event) => {
       event.preventDefault();
+      const orderId = Number(advanceForm.dataset.orderId);
+      const isClaim = advanceForm.dataset.action === 'claim';
+      const balance = Number(advanceForm.dataset.balance || 0);
+
+      if (isClaim && balance > 0) {
+        state.paymentModalOrderId = orderId;
+        await render();
+        return;
+      }
+
       const fd = new FormData(advanceForm);
       const staffIds = fd.getAll('assignedStaffId').map(Number).filter((id) => id > 0);
       const assigned = staffIds.length > 0 ? staffIds : null;
-      await advanceOrder(Number(advanceForm.dataset.orderId), assigned);
+      await advanceOrder(orderId, assigned);
+      await render();
+    });
+  });
+
+  document.querySelectorAll<HTMLFormElement>('.claim-payment-form').forEach((form) => {
+    const method = form.querySelector<HTMLSelectElement>('select[name="method"]');
+    const reference = form.querySelector<HTMLInputElement>('input[name="reference"]');
+    const syncRowPayment = () => {
+      const isGcash = method?.value === 'gcash';
+      if (reference) {
+        reference.closest('label')!.hidden = !isGcash;
+        reference.required = isGcash;
+        if (!isGcash) reference.value = '';
+      }
+    };
+    method?.addEventListener('change', syncRowPayment);
+    syncRowPayment();
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const fd = new FormData(form);
+      const amount = Number(fd.get('amount'));
+      if (amount <= 0) return;
+      const orderId = Number(form.dataset.orderId);
+      await recordPayment(orderId, {
+        amount,
+        method: String(fd.get('method')) as 'cash' | 'gcash',
+        reference: String(fd.get('reference') ?? '') || null,
+      });
+      await advanceOrder(orderId, null);
+      state.paymentModalOrderId = 0;
+      await render();
+    });
+  });
+
+  document.querySelectorAll<HTMLButtonElement>('[data-close-payment-modal]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      state.paymentModalOrderId = 0;
       await render();
     });
   });
