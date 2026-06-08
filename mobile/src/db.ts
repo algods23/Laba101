@@ -85,6 +85,8 @@ export type OrderRow = {
   foldedBy: number | null;
   foldedByName: string | null;
   foldedByStaffIds: number[];
+  releasedBy: number | null;
+  releasedByName: string | null;
   dueAt: string;
   createdAt: string;
 };
@@ -148,8 +150,30 @@ export type Subcleaning = {
   machineIds: number[];
   machineNames: string;
   cleaningStatus: string;
+  cleaningType?: 'tube' | 'general';
   notes: string | null;
   branch: string;
+};
+
+export type ActivityLog = {
+  id: number;
+  timestamp: string;
+  staffId: number | null;
+  staffName: string;
+  action: string;
+  details: string;
+  branch: string;
+};
+
+export type InventoryItem = {
+  id: number;
+  name: string;
+  unit: string;
+  quantity: number;
+  reorderLevel: number;
+  notes: string | null;
+  branch: string;
+  updatedAt: string;
 };
 
 type AppSetting = {
@@ -531,6 +555,7 @@ async function ensureSchema() {
       notes TEXT,
       foldedBy INTEGER,
       foldedByStaffIds TEXT,
+      releasedBy INTEGER,
       dueAt TEXT,
       createdAt TEXT NOT NULL
     );
@@ -548,7 +573,9 @@ async function ensureSchema() {
     CREATE TABLE IF NOT EXISTS daily_sales (id INTEGER PRIMARY KEY AUTOINCREMENT, saleDate TEXT NOT NULL, saleNumber TEXT, cashAmount REAL NOT NULL, gcashAmount REAL NOT NULL, totalAmount REAL NOT NULL, notes TEXT);
     CREATE TABLE IF NOT EXISTS revolving_history (id INTEGER PRIMARY KEY AUTOINCREMENT, revolvingNumber TEXT NOT NULL, name TEXT NOT NULL, amount REAL NOT NULL, category TEXT NOT NULL, description TEXT, type TEXT NOT NULL, createdAt TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS machines (id INTEGER PRIMARY KEY AUTOINCREMENT, machineName TEXT NOT NULL, machineType TEXT NOT NULL, status TEXT NOT NULL, branch TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS subcleanings (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL, machineIds TEXT NOT NULL, machineNames TEXT NOT NULL, cleaningStatus TEXT NOT NULL, notes TEXT, branch TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS subcleanings (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL, machineIds TEXT NOT NULL, machineNames TEXT NOT NULL, cleaningStatus TEXT NOT NULL, cleaningType TEXT NOT NULL DEFAULT 'tube', notes TEXT, branch TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS activity_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL, staffId INTEGER, staffName TEXT NOT NULL, action TEXT NOT NULL, details TEXT, branch TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS inventory_items (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, unit TEXT NOT NULL, quantity REAL NOT NULL DEFAULT 0, reorderLevel REAL NOT NULL DEFAULT 0, notes TEXT, branch TEXT NOT NULL, updatedAt TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
   `);
 
@@ -574,6 +601,7 @@ async function ensureSchema() {
   await addColumnIfMissing(db, 'orders', 'extras', 'TEXT');
   await addColumnIfMissing(db, 'orders', 'notes', 'TEXT');
   await addColumnIfMissing(db, 'orders', 'foldedByStaffIds', 'TEXT');
+  await addColumnIfMissing(db, 'orders', 'releasedBy', 'INTEGER');
   await addColumnIfMissing(db, 'orders', 'dueAt', 'TEXT');
   await addColumnIfMissing(db, 'orders', 'createdAt', 'TEXT NOT NULL DEFAULT ""');
   await addColumnIfMissing(db, 'daily_sales', 'saleNumber', 'TEXT');
@@ -581,6 +609,7 @@ async function ensureSchema() {
   await addColumnIfMissing(db, 'daily_sales', 'endorsedTo', 'TEXT');
   await addColumnIfMissing(db, 'daily_sales', 'statusUpdatedAt', 'TEXT');
   await addColumnIfMissing(db, 'disbursement_expenses', 'disbursementType', 'TEXT NOT NULL DEFAULT "daily"');
+  await addColumnIfMissing(db, 'subcleanings', 'cleaningType', 'TEXT NOT NULL DEFAULT "tube"');
 
   const staffCount = await db.query('SELECT COUNT(*) as count FROM staff');
   const isFreshInstall = ((staffCount.values?.[0] as { count: number } | undefined)?.count ?? 0) === 0;
@@ -616,6 +645,7 @@ function hydrateOrder(row: Record<string, unknown>): OrderRow {
   const paidAmount = Number(row.paidAmount ?? 0);
   const totalAmount = Number(row.totalAmount ?? 0);
   const foldedBy = Number(row.foldedBy);
+  const releasedBy = Number(row.releasedBy);
   const serviceLines = parseJson<OrderLine[]>(row.serviceLines as string | null, []);
   const serviceId = Number(row.serviceId);
   const service = String(row.service);
@@ -646,6 +676,8 @@ function hydrateOrder(row: Record<string, unknown>): OrderRow {
     foldedBy: Number.isFinite(foldedBy) && foldedBy > 0 ? foldedBy : null,
     foldedByName: row.foldedByName ? String(row.foldedByName) : null,
     foldedByStaffIds: parseJson<number[]>(row.foldedByStaffIds as string | null, []),
+    releasedBy: Number.isFinite(releasedBy) && releasedBy > 0 ? releasedBy : null,
+    releasedByName: row.releasedByName ? String(row.releasedByName) : null,
     dueAt: String(row.dueAt),
     createdAt: String(row.createdAt),
   };
@@ -927,11 +959,13 @@ export async function listOrders(branch: string): Promise<OrderRow[]> {
         ...order,
         serviceLines: order.serviceLines ?? [{ id: order.serviceId, name: order.service, price: Number(order.price), quantity: 1, total: Number(order.price) }],
         foldedByStaffIds: order.foldedByStaffIds ?? [],
+        releasedBy: order.releasedBy ?? null,
+        releasedByName: order.releasedByName ?? null,
         balance: Number((order.totalAmount - order.paidAmount).toFixed(2)),
       }));
   }
   const db = await ensureNativeDb();
-  const result = await db.query('SELECT o.*, s.name as foldedByName FROM orders o LEFT JOIN staff s ON s.id = o.foldedBy WHERE o.branch = ? ORDER BY o.id DESC', [branch]);
+  const result = await db.query('SELECT o.*, folded.name as foldedByName, released.name as releasedByName FROM orders o LEFT JOIN staff folded ON folded.id = o.foldedBy LEFT JOIN staff released ON released.id = o.releasedBy WHERE o.branch = ? ORDER BY o.id DESC', [branch]);
   return (result.values ?? []).map((row) => hydrateOrder(row as Record<string, unknown>));
 }
 
@@ -983,6 +1017,8 @@ export async function createOrder(input: { customerId?: number; customerName: st
     foldedBy: null,
     foldedByName: null,
     foldedByStaffIds: [],
+    releasedBy: null,
+    releasedByName: null,
     dueAt: new Date(Date.now() + Math.max(1, ...selectedServices.map((item) => item.turnaroundHours)) * 60 * 60 * 1000).toISOString(),
     createdAt: nowIso(),
   };
@@ -1030,6 +1066,10 @@ export async function advanceOrder(orderId: number, assignedStaffId?: number | n
     ids.push(...assignedIds);
     order.foldedByStaffIds = ids;
   }
+  if (next === 'claimed' && assignedStaffId) {
+    const assignedIds = Array.isArray(assignedStaffId) ? assignedStaffId : [assignedStaffId];
+    order.releasedBy = assignedIds[0] || null;
+  }
   if (!Capacitor.isNativePlatform()) {
     const all = readBrowser<OrderRow[]>('orders', seedOrders);
     const existing = all.find((item) => item.id === order.id);
@@ -1039,8 +1079,8 @@ export async function advanceOrder(orderId: number, assignedStaffId?: number | n
   }
   const db = await ensureNativeDb();
   await db.run(
-    'UPDATE orders SET workflowCompleted = ?, status = ?, foldedBy = ?, foldedByStaffIds = ? WHERE id = ?',
-    [JSON.stringify(order.workflowCompleted), order.status, order.foldedBy, JSON.stringify(order.foldedByStaffIds ?? []), order.id],
+    'UPDATE orders SET workflowCompleted = ?, status = ?, foldedBy = ?, foldedByStaffIds = ?, releasedBy = ? WHERE id = ?',
+    [JSON.stringify(order.workflowCompleted), order.status, order.foldedBy, JSON.stringify(order.foldedByStaffIds ?? []), order.releasedBy, order.id],
   );
 }
 
@@ -1149,6 +1189,25 @@ export async function createFoldLog(input: { orderTicket: string; staffName: str
   }
   const db = await ensureNativeDb();
   await db.run('INSERT INTO fold_logs (orderTicket, staffName, foldCount, rate, total, createdAt) VALUES (?, ?, ?, ?, ?, ?)', [input.orderTicket, input.staffName, input.foldCount, input.rate, total, nowIso()]);
+}
+
+export async function listActivityLogs(branch: string): Promise<ActivityLog[]> {
+  if (!Capacitor.isNativePlatform()) return readBrowser<ActivityLog[]>('activity_logs', []).filter((item) => item.branch === branch).sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  const db = await ensureNativeDb();
+  const result = await db.query('SELECT id, timestamp, staffId, staffName, action, details, branch FROM activity_logs WHERE branch = ? ORDER BY timestamp DESC, id DESC', [branch]);
+  return (result.values ?? []) as ActivityLog[];
+}
+
+export async function recordActivityLog(input: { staffId?: number | null; staffName: string; action: string; details?: string; branch: string }) {
+  const row = { timestamp: nowIso(), staffId: input.staffId ?? null, staffName: input.staffName, action: input.action, details: input.details ?? '', branch: input.branch };
+  if (!Capacitor.isNativePlatform()) {
+    const items = readBrowser<ActivityLog[]>('activity_logs', []);
+    items.unshift({ id: nextNumericId(items), ...row });
+    writeBrowser('activity_logs', items);
+    return;
+  }
+  const db = await ensureNativeDb();
+  await db.run('INSERT INTO activity_logs (timestamp, staffId, staffName, action, details, branch) VALUES (?, ?, ?, ?, ?, ?)', [row.timestamp, row.staffId, row.staffName, row.action, row.details, row.branch]);
 }
 
 export async function listExpenses(): Promise<DisbursementExpense[]> {
@@ -1393,6 +1452,31 @@ export async function listMachines(branch: string): Promise<Machine[]> {
   return (result.values ?? []) as Machine[];
 }
 
+export async function listInventoryItems(branch: string): Promise<InventoryItem[]> {
+  if (!Capacitor.isNativePlatform()) return readBrowser<InventoryItem[]>('inventory_items', []).filter((item) => item.branch === branch).sort((a, b) => a.name.localeCompare(b.name));
+  const db = await ensureNativeDb();
+  const result = await db.query('SELECT id, name, unit, quantity, reorderLevel, notes, branch, updatedAt FROM inventory_items WHERE branch = ? ORDER BY name ASC', [branch]);
+  return (result.values ?? []) as InventoryItem[];
+}
+
+export async function saveInventoryItem(input: { id?: number; name: string; unit: string; quantity: number; reorderLevel: number; notes: string; branch: string }) {
+  const row = { name: input.name, unit: input.unit, quantity: input.quantity, reorderLevel: input.reorderLevel, notes: input.notes || null, branch: input.branch, updatedAt: nowIso() };
+  if (!Capacitor.isNativePlatform()) {
+    const items = readBrowser<InventoryItem[]>('inventory_items', []);
+    const existing = input.id ? items.find((item) => item.id === input.id) : null;
+    if (existing) Object.assign(existing, row);
+    else items.unshift({ id: nextNumericId(items), ...row });
+    writeBrowser('inventory_items', items);
+    return;
+  }
+  const db = await ensureNativeDb();
+  if (input.id) {
+    await db.run('UPDATE inventory_items SET name = ?, unit = ?, quantity = ?, reorderLevel = ?, notes = ?, updatedAt = ? WHERE id = ?', [row.name, row.unit, row.quantity, row.reorderLevel, row.notes, row.updatedAt, input.id]);
+  } else {
+    await db.run('INSERT INTO inventory_items (name, unit, quantity, reorderLevel, notes, branch, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)', [row.name, row.unit, row.quantity, row.reorderLevel, row.notes, row.branch, row.updatedAt]);
+  }
+}
+
 export async function saveMachine(input: { machineName: string; machineType: 'washer' | 'dryer'; status: 'available' | 'under_cleaning' | 'maintenance'; branch: string }) {
   if (!Capacitor.isNativePlatform()) {
     const items = readBrowser<Machine[]>('machines', seedMachines);
@@ -1419,18 +1503,19 @@ export async function updateMachine(id: number, status: string) {
 }
 
 export async function listSubcleanings(branch: string): Promise<Subcleaning[]> {
-  if (!Capacitor.isNativePlatform()) return readBrowser<Subcleaning[]>('subcleanings', []).filter((item) => item.branch === branch);
+  if (!Capacitor.isNativePlatform()) return readBrowser<Subcleaning[]>('subcleanings', []).filter((item) => item.branch === branch).map((item) => ({ ...item, cleaningType: item.cleaningType ?? 'tube' }));
   const db = await ensureNativeDb();
-  const result = await db.query('SELECT id, date, machineIds, machineNames, cleaningStatus, notes, branch FROM subcleanings WHERE branch = ? ORDER BY date DESC, id DESC', [branch]);
+  const result = await db.query('SELECT id, date, machineIds, machineNames, cleaningStatus, COALESCE(cleaningType, "tube") as cleaningType, notes, branch FROM subcleanings WHERE branch = ? ORDER BY date DESC, id DESC', [branch]);
   return (result.values ?? []).map((row) => ({ ...(row as Subcleaning), machineIds: parseJson<number[]>((row as { machineIds: string }).machineIds, []) }));
 }
 
-export async function saveSubcleaning(input: { date: string; machineIds: number[]; cleaningStatus: string; notes: string; branch: string }) {
+export async function saveSubcleaning(input: { date: string; machineIds: number[]; cleaningStatus: string; notes: string; branch: string; cleaningType?: 'tube' | 'general' }) {
   const machines = await listMachines(input.branch);
   const machineNames = machines.filter((machine) => input.machineIds.includes(machine.id)).map((machine) => machine.machineName).join(', ');
+  const cleaningType = input.cleaningType ?? 'tube';
   if (!Capacitor.isNativePlatform()) {
     const logs = readBrowser<Subcleaning[]>('subcleanings', []);
-    logs.unshift({ id: nextNumericId(logs), date: input.date, machineIds: input.machineIds, machineNames, cleaningStatus: input.cleaningStatus, notes: input.notes || null, branch: input.branch });
+    logs.unshift({ id: nextNumericId(logs), date: input.date, machineIds: input.machineIds, machineNames, cleaningStatus: input.cleaningStatus, cleaningType, notes: input.notes || null, branch: input.branch });
     writeBrowser('subcleanings', logs);
     const allMachines = readBrowser<Machine[]>('machines', seedMachines);
     allMachines.forEach((machine) => {
@@ -1440,7 +1525,7 @@ export async function saveSubcleaning(input: { date: string; machineIds: number[
     return;
   }
   const db = await ensureNativeDb();
-  await db.run('INSERT INTO subcleanings (date, machineIds, machineNames, cleaningStatus, notes, branch) VALUES (?, ?, ?, ?, ?, ?)', [input.date, JSON.stringify(input.machineIds), machineNames, input.cleaningStatus, input.notes || null, input.branch]);
+  await db.run('INSERT INTO subcleanings (date, machineIds, machineNames, cleaningStatus, cleaningType, notes, branch) VALUES (?, ?, ?, ?, ?, ?, ?)', [input.date, JSON.stringify(input.machineIds), machineNames, input.cleaningStatus, cleaningType, input.notes || null, input.branch]);
   const status = input.cleaningStatus === 'completed' ? 'available' : 'under_cleaning';
   for (const id of input.machineIds) await db.run('UPDATE machines SET status = ? WHERE id = ?', [status, id]);
 }
@@ -1453,7 +1538,7 @@ export async function completeCleaning(machineId: number, branch: string): Promi
     writeBrowser('machines', allMachines);
     const logs = readBrowser<Subcleaning[]>('subcleanings', []);
     const todayStr = localDateInput();
-    logs.unshift({ id: nextNumericId(logs), date: todayStr, machineIds: [machineId], machineNames: machine?.machineName ?? '', cleaningStatus: 'completed', notes: null, branch });
+    logs.unshift({ id: nextNumericId(logs), date: todayStr, machineIds: [machineId], machineNames: machine?.machineName ?? '', cleaningStatus: 'completed', cleaningType: 'tube', notes: null, branch });
     writeBrowser('subcleanings', logs);
     return;
   }
@@ -1463,7 +1548,11 @@ export async function completeCleaning(machineId: number, branch: string): Promi
   await db.run('UPDATE machines SET status = ? WHERE id = ?', ['available', machineId]);
   const todayStr = localDateInput();
   await db.run(
-    'INSERT INTO subcleanings (date, machineIds, machineNames, cleaningStatus, notes, branch) VALUES (?, ?, ?, ?, ?, ?)',
-    [todayStr, JSON.stringify([machineId]), machineName, 'completed', null, branch]
+    'INSERT INTO subcleanings (date, machineIds, machineNames, cleaningStatus, cleaningType, notes, branch) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [todayStr, JSON.stringify([machineId]), machineName, 'completed', 'tube', null, branch]
   );
+}
+
+export async function confirmGeneralCleaning(branch: string, staffName: string) {
+  await saveSubcleaning({ date: localDateInput(), machineIds: [], cleaningStatus: 'completed', cleaningType: 'general', notes: `Confirmed by ${staffName}`, branch });
 }

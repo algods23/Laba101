@@ -8,6 +8,7 @@ import {
   authenticateUser,
   calculatePricing,
   completeCleaning,
+  confirmGeneralCleaning,
   createExpense,
   createFoldLog,
   createOrder,
@@ -17,11 +18,13 @@ import {
   initOfflineStore,
   listAllStaff,
   listAllServices,
+  listActivityLogs,
   listCustomers,
   listDailySales,
   listExpenses,
   listFoldLogs,
   listItemCategories,
+  listInventoryItems,
   listMachines,
   listOrders,
   listPayments,
@@ -35,6 +38,7 @@ import {
   deleteOrderForRefund,
   saveDailySale,
   saveItemCategory,
+  saveInventoryItem,
   saveMachine,
   saveService,
   saveSubcleaning,
@@ -46,11 +50,14 @@ import {
   updateMachine,
   updateStaff,
   updateDailySaleStatus,
+  recordActivityLog,
+  type ActivityLog,
   type Customer,
   type DailySale,
   type DisbursementExpense,
   type FoldLog,
   type ItemCategory,
+  type InventoryItem,
   type LaundryService,
   type Machine,
   type OrderRow,
@@ -97,7 +104,7 @@ type BluetoothThermalPrinterPlugin = {
 
 const BluetoothThermalPrinter = registerPlugin<BluetoothThermalPrinterPlugin>('BluetoothThermalPrinter');
 
-type TabKey = 'dashboard' | 'pos' | 'orders' | 'archived' | 'customers' | 'pricing' | 'disbursements' | 'reports' | 'inventory' | 'maintenance' | 'staff' | 'revolving' | 'settings';
+type TabKey = 'dashboard' | 'pos' | 'orders' | 'archived' | 'customers' | 'pricing' | 'disbursements' | 'reports' | 'logs' | 'inventory' | 'maintenance' | 'staff' | 'revolving' | 'settings';
 
 type ReportType = 'sales' | 'disbursement' | 'fold_count' | 'revolving_fund' | 'summary';
 
@@ -116,6 +123,7 @@ const tabLabels: Record<TabKey, string> = {
   pricing: 'Pricing Services',
   disbursements: 'Daily Report',
   reports: 'Reports',
+  logs: 'Logs',
   inventory: 'Inventory',
   maintenance: 'Maintenance',
   staff: 'Staff',
@@ -300,6 +308,17 @@ function isGensanStaff(user: Staff | null) {
 
 function isMintalStaff(user: Staff | null) {
   return user?.role === 'staff' && user.branch.toLowerCase().includes('mintal');
+}
+
+async function recordUiLog(action: string, details = '') {
+  if (!state.currentUser) return;
+  await recordActivityLog({
+    staffId: state.currentUser.id,
+    staffName: state.currentUser.name,
+    action,
+    details,
+    branch: await getBranch(),
+  });
 }
 
 function renderHtmlTable(headers: string[], bodyRows: string[][], tableClass = 'data-table') {
@@ -534,6 +553,7 @@ function navIcon(tab: TabKey) {
     pricing: 'PS',
     disbursements: 'DR',
     reports: 'RP',
+    logs: 'LG',
     inventory: 'IN',
     maintenance: 'MT',
     staff: 'ST',
@@ -558,11 +578,13 @@ async function loadData() {
   const sales = await listDailySales();
   const machines = await listMachines(branch);
   const subcleanings = await listSubcleanings(branch);
+  const activityLogs = await listActivityLogs(branch);
+  const inventoryItems = await listInventoryItems(branch);
   const revolvingHistory = await listRevolvingHistory();
   const foldRate = await getFoldRate();
   const reportEmail = await getSetting('report_email');
 
-  return { branch, staff, allStaff, customers, services, allServices, categories, orders, payments, foldLogs, expenses, sales, machines, subcleanings, revolvingHistory, foldRate, reportEmail: reportEmail ?? '' };
+  return { branch, staff, allStaff, customers, services, allServices, categories, orders, payments, foldLogs, expenses, sales, machines, subcleanings, activityLogs, inventoryItems, revolvingHistory, foldRate, reportEmail: reportEmail ?? '' };
 }
 
 async function render() {
@@ -663,7 +685,8 @@ async function render() {
         ${state.tab === 'pricing' ? renderPricing(data.allServices, data.categories) : ''}
         ${state.tab === 'disbursements' ? renderDisbursements(data.expenses, data.sales) : ''}
         ${state.tab === 'reports' ? renderReports(data.orders, data.payments, data.sales, data.expenses, data.revolvingHistory, data.allStaff, data.foldRate, salesTotal, disbursementTotal, profit) : ''}
-        ${state.tab === 'inventory' ? renderInventory(data.services, data.categories) : ''}
+        ${state.tab === 'logs' ? renderLogs(data.activityLogs) : ''}
+        ${state.tab === 'inventory' ? renderInventory(data.inventoryItems, data.branch) : ''}
         ${state.tab === 'maintenance' ? renderMaintenance(data.machines, data.subcleanings, data.branch) : ''}
         ${state.tab === 'staff' ? renderStaff(data.allStaff, data.branch) : ''}
         ${state.tab === 'revolving' ? renderRevolving(data.sales, data.revolvingHistory, data.orders, data.expenses) : ''}
@@ -680,6 +703,7 @@ async function render() {
   bindOrderFilters();
   bindCustomerSearch();
   bindMaintenanceForms();
+  bindInventoryForms(data.inventoryItems, data.branch);
   bindStaffForms(data.allStaff);
   bindRevolvingForms();
   bindSettingsForms();
@@ -687,7 +711,7 @@ async function render() {
 }
 
 function visibleTabs(): TabKey[] {
-  if (state.currentUser?.role === 'admin') return (Object.keys(tabLabels) as TabKey[]).filter((t) => t !== 'inventory');
+  if (state.currentUser?.role === 'admin') return Object.keys(tabLabels) as TabKey[];
   const staffTabs: TabKey[] = ['dashboard', 'pos', 'orders', 'archived', 'disbursements', 'reports', 'maintenance', 'revolving'];
   if (isGensanStaff(state.currentUser)) return ['dashboard', 'disbursements', 'reports', 'maintenance', 'revolving'];
   return isMintalStaff(state.currentUser) ? staffTabs.filter((tab) => tab !== 'revolving') : staffTabs;
@@ -755,6 +779,17 @@ function renderDashboard(metrics: { paidToday: number; cashPaidToday: number; gc
     <section class="dashboard-main">
       <article class="panel revenue-panel">
         ${sectionTitle('Revenue overview', 'Paid amount for the last 7 days.')}
+        <button class="secondary dashboard-print-button" type="button" data-print-daily-summary>Print Daily Summary</button>
+        <div class="dashboard-summary-slip">
+          <h3>Laba101 Daily Summary</h3>
+          <p>${escapeHtml(localDateInput())}</p>
+          <div><span>Paid today:</span><strong>${money(metrics.paidToday)}</strong></div>
+          <div><span>Cash:</span><strong>${money(metrics.cashPaidToday)}</strong></div>
+          <div><span>GCash:</span><strong>${money(metrics.gcashPaidToday)}</strong></div>
+          <div><span>Disbursement:</span><strong>${money(metrics.disbursementToday)}</strong></div>
+          <div><span>Cash-on hand:</span><strong>${money(metrics.cashOnHandToday)}</strong></div>
+          <div class="signature-row"><span>Name of receiver and signature</span></div>
+        </div>
         <div class="stats compact dashboard-stats">
           <div class="stat paid-today-stat">
             <span class="card-label">Paid Today</span>
@@ -994,7 +1029,7 @@ function renderOrderRow(order: OrderRow, staff: Staff[], services: LaundryServic
       <td><strong>${escapeHtml(order.ticket)}</strong><div class="small">${escapeHtml(formatDate(order.createdAt))}</div></td>
       <td>${escapeHtml(order.customer)}<div class="small">${escapeHtml(order.phone ?? '')}</div></td>
       <td>${escapeHtml(order.service)}${extrasLabel ? `<div class="small">Extras: ${extrasLabel}</div>` : ''}</td>
-      <td class="amount-cell"><strong>${money(order.totalAmount)}</strong><div class="small ${paymentStatus === 'paid' ? 'ok' : paymentStatus === 'partial' ? 'warn' : 'meta'}">${escapeHtml(paymentStatus)} &middot; Bal: ${money(order.balance)}</div></td>
+      <td class="amount-cell"><strong>${money(order.totalAmount)}</strong><div class="payment-status status-${paymentStatus}">${escapeHtml(paymentStatus)}${paymentStatus === 'paid' ? '' : ` &middot; Bal: ${money(order.balance)}`}</div></td>
       <td>
       <div class="row-actions">
         ${nextStep?.key === 'fold' ? `<form class="inline-form advance-form flex-wrap" data-order-id="${order.id}">
@@ -1004,6 +1039,10 @@ function renderOrderRow(order: OrderRow, staff: Staff[], services: LaundryServic
           </select>`).join('') : ''}
           <button class="secondary" type="submit">Fold</button>
         </form>` : nextStep?.key === 'claimed' && !claimedDone ? `<form class="inline-form advance-form" data-order-id="${order.id}" data-action="claim" data-balance="${order.balance}">
+          <select name="releasedBy" required>
+            <option value="">-- Released by --</option>
+            ${staff.map((person) => `<option value="${person.id}">${escapeHtml(person.name)}</option>`).join('')}
+          </select>
           <button class="secondary" type="submit">Claim</button>
         </form>` : ''}
         ${order.balance > 0 ? `
@@ -1018,16 +1057,6 @@ function renderOrderRow(order: OrderRow, staff: Staff[], services: LaundryServic
         ${canDelete ? `<button class="secondary btn-sm" type="button" data-delete-order="${order.id}">Delete</button>` : ''}
         <button class="secondary btn-sm" data-receipt="${order.id}">Receipt</button>
       </div>
-      </td>
-    </tr>
-    <tr class="order-row-detail">
-      <td colspan="5">
-        <div class="order-detail-row">
-          <div class="${order.status === 'ready' || order.status === 'claimed' ? 'ok' : 'warn'}">${escapeHtml(order.status)}</div>
-          <div class="workflow-progress order-workflow-progress">
-            ${steps.map((step) => `<span class="${order.workflowCompleted.includes(step.key) ? 'is-done' : nextStep?.key === step.key ? 'is-next' : ''}">${escapeHtml(step.label)}</span>`).join('')}
-          </div>
-        </div>
       </td>
     </tr>
   `;
@@ -1570,21 +1599,47 @@ function renderReports(orders: OrderRow[], payments: Payment[], sales: DailySale
   `;
 }
 
-function renderInventory(services: LaundryService[], categories: ItemCategory[]) {
+function renderLogs(logs: ActivityLog[]) {
+  return `
+    <section class="grid content full">
+      <article class="panel span-2">
+        ${sectionTitle('Activity Logs', 'Recorded staff actions and timestamps')}
+        <div class="table-scroll">
+          <div class="table wide-table">
+            <div class="table-head"><div>Timestamp</div><div>Staff</div><div>Action</div><div>Details</div></div>
+            ${logs.map((log) => `<div class="table-row"><div>${formatDate(log.timestamp)}</div><div>${escapeHtml(log.staffName)}</div><div><strong>${escapeHtml(log.action)}</strong></div><div>${escapeHtml(log.details)}</div></div>`).join('') || '<div class="helper">No logs yet.</div>'}
+          </div>
+        </div>
+      </article>
+    </section>
+  `;
+}
+
+function renderInventory(items: InventoryItem[], branch: string) {
   return `
     <section class="grid content full">
       <article class="panel">
-        ${sectionTitle('Inventory', 'Service catalog and item load limits')}
-        <div class="summary-list">
-          <div><span>Active services</span><strong>${services.filter((service) => service.isActive).length}</strong></div>
-          <div><span>Item categories</span><strong>${categories.length}</strong></div>
-        </div>
+        ${sectionTitle('Inventory Item', 'Custom stocks and supplies')}
+        <form id="inventory-form" class="form">
+          <input name="id" type="hidden" />
+          <label>Item name<input name="name" required placeholder="e.g. Finishing Spray 60ml" /></label>
+          <div class="form-row">
+            <label>Unit<input name="unit" required placeholder="pcs, bottle, pack" /></label>
+            <label>Quantity<input name="quantity" type="number" step="0.01" min="0" required value="0" /></label>
+          </div>
+          <label>Reorder level<input name="reorderLevel" type="number" step="0.01" min="0" value="0" /></label>
+          <label>Notes<textarea name="notes" placeholder="Supplier, storage, or remarks"></textarea></label>
+          <input name="branch" type="hidden" value="${escapeHtml(branch)}" />
+          <button class="primary" type="submit">Save item</button>
+        </form>
       </article>
-      <article class="panel">
-        ${sectionTitle('Service inventory', 'Current sellable laundry services')}
-        <div class="table">
-          <div class="table-head"><div>Name</div><div>Category</div><div>Price</div><div>Max KG</div><div>Status</div></div>
-          ${services.map((service) => `<div class="table-row"><div><strong>${escapeHtml(service.name)}</strong></div><div>${escapeHtml(service.category)}</div><div>${money(service.price)}</div><div>${service.maxKg} kg</div><div>${service.isActive ? 'Active' : 'Inactive'}</div></div>`).join('')}
+      <article class="panel span-2">
+        ${sectionTitle('Stock List', 'Editable branch inventory')}
+        <div class="table-scroll">
+          <div class="table wide-table">
+            <div class="table-head"><div>Item</div><div>Qty</div><div>Unit</div><div>Reorder</div><div>Status</div><div>Updated</div><div>Action</div></div>
+            ${items.map((item) => `<div class="table-row"><div><strong>${escapeHtml(item.name)}</strong><div class="small">${escapeHtml(item.notes ?? '')}</div></div><div>${item.quantity}</div><div>${escapeHtml(item.unit)}</div><div>${item.reorderLevel}</div><div class="${item.quantity <= item.reorderLevel ? 'warn' : 'ok'}">${item.quantity <= item.reorderLevel ? 'Low stock' : 'OK'}</div><div>${formatDate(item.updatedAt)}</div><div><button class="secondary edit-inventory-btn" type="button" data-id="${item.id}">Edit</button></div></div>`).join('') || '<div class="helper">No inventory items yet.</div>'}
+          </div>
         </div>
       </article>
     </section>
@@ -1594,14 +1649,22 @@ function renderInventory(services: LaundryService[], categories: ItemCategory[])
 function renderMaintenance(machines: Machine[], subcleanings: Subcleaning[], branch: string) {
   const availableMachines = machines.filter((machine) => machine.status !== 'under_cleaning');
   const cleaningMachines = machines.filter((machine) => machine.status === 'under_cleaning');
+  const calendarDays = Array.from({ length: 14 }, (_, index) => {
+    const date = new Date();
+    date.setDate(date.getDate() - index);
+    const key = localDateInput(date);
+    const records = subcleanings.filter((row) => row.date === key);
+    return { key, records };
+  });
+  const generalDoneToday = subcleanings.some((row) => row.date === today() && row.cleaningType === 'general');
   return `
     <section class="page-head">
       <div>
         <h2>Maintenance & Cleaning</h2>
-        <p class="meta">Manage machine subcleaning and maintenance records.</p>
+        <p class="meta">Manage machine tube cleaning, general cleaning, and maintenance records.</p>
       </div>
       <div class="segmented">
-        <button class="${state.maintenanceTab === 'cleaning' ? 'is-active' : ''}" data-maintenance-tab="cleaning" type="button">Subcleaning</button>
+        <button class="${state.maintenanceTab === 'cleaning' ? 'is-active' : ''}" data-maintenance-tab="cleaning" type="button">Tube Cleaning</button>
         <button class="${state.maintenanceTab === 'machines' ? 'is-active' : ''}" data-maintenance-tab="machines" type="button">Machine Management</button>
       </div>
     </section>
@@ -1615,10 +1678,18 @@ function renderMaintenance(machines: Machine[], subcleanings: Subcleaning[], bra
             ${availableMachines.map((machine) => `<label class="machine-card"><input type="checkbox" name="machineIds" value="${machine.id}" /><span><strong>${escapeHtml(machine.machineName)}</strong><small>${escapeHtml(machine.machineType)}</small></span><em></em></label>`).join('') || '<p class="helper">All machines are currently being cleaned.</p>'}
           </fieldset>
           <input type="hidden" name="cleaningStatus" value="in_progress" />
+          <input type="hidden" name="cleaningType" value="tube" />
           <label>Notes <textarea name="notes" placeholder="e.g. Deep clean filters"></textarea></label>
           <input type="hidden" name="branch" value="${escapeHtml(branch)}" />
-          <button class="primary" type="submit">Start Cleaning</button>
+          <button class="primary" type="submit">Start Tube Cleaning</button>
         </form>
+      </article>
+      <article class="panel">
+        ${sectionTitle('General Cleaning', 'Confirm general cleaning for today')}
+        <div class="summary-list">
+          <div><span>Today</span><strong>${generalDoneToday ? 'Confirmed' : 'Pending'}</strong></div>
+        </div>
+        <button class="primary" type="button" id="confirm-general-cleaning" ${generalDoneToday ? 'disabled' : ''}>Confirm General Cleaning</button>
       </article>
       <article class="panel warning-panel">
         ${sectionTitle('Under Cleaning', 'Machines currently being serviced.')}
@@ -1632,13 +1703,19 @@ function renderMaintenance(machines: Machine[], subcleanings: Subcleaning[], bra
         </div>
       </article>
       <article class="panel span-2">
-        ${sectionTitle('Daily Cleaning Checklist', 'Track which machines have been cleaned today.')}
+        ${sectionTitle('Tube Cleaning Checklist', 'Track which machines have been cleaned today.')}
         <div class="table">
           <div class="table-head"><div>Machine</div><div>Type</div><div>Status</div><div>Notes</div><div>Date</div></div>
           ${machines.map((machine) => {
             const record = subcleanings.find((row) => row.machineIds.includes(machine.id) && row.date === today());
             return `<div class="table-row"><div><strong>${escapeHtml(machine.machineName)}</strong></div><div>${escapeHtml(machine.machineType)}</div><div>${record ? escapeHtml(record.cleaningStatus.replace('_', ' ')) : 'Not Cleaned'}</div><div>${escapeHtml(record?.notes ?? '-')}</div><div>${today()}</div></div>`;
           }).join('')}
+        </div>
+      </article>
+      <article class="panel span-2">
+        ${sectionTitle('Cleaning Calendar', 'Recent days with tube or general cleaning')}
+        <div class="maintenance-calendar">
+          ${calendarDays.map((day) => `<div class="calendar-day ${day.records.length ? 'has-records' : ''}"><strong>${escapeHtml(day.key)}</strong><span>${day.records.some((row) => row.cleaningType === 'general') ? 'General cleaning' : ''}</span><small>${day.records.filter((row) => row.cleaningType !== 'general').length ? `${day.records.filter((row) => row.cleaningType !== 'general').length} tube record(s)` : 'No tube records'}</small></div>`).join('')}
         </div>
       </article>
     </section>
@@ -1827,6 +1904,9 @@ function bindNavigation() {
       state.printerError = error instanceof Error ? error.message : 'Bluetooth thermal print failed.';
       void render();
     });
+  });
+  document.querySelector<HTMLButtonElement>('[data-print-daily-summary]')?.addEventListener('click', () => {
+    window.print();
   });
   document.querySelectorAll<HTMLElement>('[data-report-tab]').forEach((button) => {
     button.addEventListener('click', () => {
@@ -2142,15 +2222,16 @@ function bindOrderForms(data: Awaited<ReturnType<typeof loadData>>) {
       const balance = Number(advanceForm.dataset.balance || 0);
 
       if (isClaim && balance > 0) {
-        state.paymentModalOrderId = orderId;
-        await render();
+        alert('Please complete the balance before claiming this order.');
         return;
       }
 
       const fd = new FormData(advanceForm);
       const staffIds = fd.getAll('assignedStaffId').map(Number).filter((id) => id > 0);
-      const assigned = staffIds.length > 0 ? staffIds : null;
+      const releasedBy = Number(fd.get('releasedBy') || 0);
+      const assigned = staffIds.length > 0 ? staffIds : releasedBy > 0 ? releasedBy : null;
       await advanceOrder(orderId, assigned);
+      await recordUiLog(isClaim ? 'Claim order' : 'Advance order', `Order ID ${orderId}`);
       await render();
     });
   });
@@ -2215,6 +2296,7 @@ function bindOrderForms(data: Awaited<ReturnType<typeof loadData>>) {
       if (!confirm(`Confirm payment of ${money(amount)} via ${method.toUpperCase()}?`)) return;
       
       await recordPayment(Number(paymentForm.dataset.orderId), { amount, method, reference });
+      await recordUiLog('Record payment', `${money(amount)} ${method.toUpperCase()} for order ID ${paymentForm.dataset.orderId}`);
       await render();
     });
   });
@@ -2227,6 +2309,7 @@ function bindOrderForms(data: Awaited<ReturnType<typeof loadData>>) {
       try {
         if (state.receiptOrderId === orderId) state.receiptOrderId = 0;
         await cancelOrder(orderId);
+        await recordUiLog('Cancel order', `Order ID ${orderId}`);
         await render();
       } catch (err) {
         alert(err instanceof Error ? err.message : 'Cancel failed.');
@@ -2773,6 +2856,40 @@ function bindMaintenanceForms() {
       const isDeactivate = btn.classList.contains('deactivate-machine-btn');
       await updateMachine(id, isDeactivate ? 'inactive' : 'available');
       await render();
+    });
+  });
+}
+
+function bindInventoryForms(items: InventoryItem[], branch: string) {
+  const form = document.querySelector<HTMLFormElement>('#inventory-form');
+  form?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const fd = new FormData(event.currentTarget);
+    const id = Number(fd.get('id') || 0);
+    await saveInventoryItem({
+      id: id || undefined,
+      name: String(fd.get('name') ?? ''),
+      unit: String(fd.get('unit') ?? ''),
+      quantity: Number(fd.get('quantity') ?? 0),
+      reorderLevel: Number(fd.get('reorderLevel') ?? 0),
+      notes: String(fd.get('notes') ?? ''),
+      branch,
+    });
+    await recordUiLog(id ? 'Update inventory item' : 'Create inventory item', String(fd.get('name') ?? ''));
+    await render();
+  });
+
+  document.querySelectorAll<HTMLButtonElement>('.edit-inventory-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const item = items.find((entry) => entry.id === Number(btn.dataset.id));
+      if (!item || !form) return;
+      (form.querySelector('[name=id]') as HTMLInputElement).value = String(item.id);
+      (form.querySelector('[name=name]') as HTMLInputElement).value = item.name;
+      (form.querySelector('[name=unit]') as HTMLInputElement).value = item.unit;
+      (form.querySelector('[name=quantity]') as HTMLInputElement).value = String(item.quantity);
+      (form.querySelector('[name=reorderLevel]') as HTMLInputElement).value = String(item.reorderLevel);
+      (form.querySelector('[name=notes]') as HTMLTextAreaElement).value = item.notes ?? '';
+      form.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
   });
 }
