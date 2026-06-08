@@ -692,7 +692,7 @@ button {
 }
 
 .report-preview .table-row {
-  min-width: 820px;
+  min-width: 500px;
 }
 
 .report-preview .table-head > div,
@@ -710,18 +710,23 @@ button {
 
 .report-preview-table .table-head,
 .report-preview-table .table-row {
-  min-width: 820px;
-  grid-template-columns: 90px 102px 110px 88px 88px 96px 88px;
+  min-width: 600px;
+  grid-template-columns: 70px 1fr 80px 80px 90px;
+  font-size: 0.85rem;
 }
 
 .report-preview-table.sales-table .table-head,
 .report-preview-table.sales-table .table-row {
-  grid-template-columns: 90px 1.2fr 88px 88px 96px;
+  min-width: 500px;
+  grid-template-columns: 70px 1.2fr 70px 70px 80px;
+  font-size: 0.85rem;
 }
 
 .report-preview-table.report-disbursement-table .table-head,
 .report-preview-table.report-disbursement-table .table-row {
-  grid-template-columns: 90px 110px 90px 1.2fr 1fr 96px;
+  min-width: 550px;
+  grid-template-columns: 70px 90px 70px 1fr 1fr 80px;
+  font-size: 0.85rem;
 }
 
 .report-preview-table .table-row {
@@ -835,13 +840,14 @@ button {
   overflow: hidden;
   display: grid;
   gap: 0;
-  min-width: 560px;
+  min-width: 400px;
+  font-size: 0.85rem;
 }
 
 .sales-summary-table .table-head,
 .sales-summary-table .table-row {
   display: grid;
-  grid-template-columns: minmax(120px, 1.4fr) repeat(3, minmax(110px, 1fr));
+  grid-template-columns: minmax(100px, 1.4fr) repeat(3, minmax(80px, 1fr));
   align-items: center;
   gap: 0;
   min-width: 0;
@@ -856,7 +862,7 @@ button {
 }
 
 .sales-summary-table .table-head div {
-  padding: 14px 16px;
+  padding: 10px 12px;
   text-align: right;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -876,7 +882,7 @@ button {
 }
 
 .sales-summary-table .table-row div {
-  padding: 14px 16px;
+  padding: 10px 12px;
   text-align: right;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2101,7 +2107,7 @@ legend {
 
   .report-preview-table .table-head,
   .report-preview-table .table-row {
-    min-width: 760px;
+    min-width: 450px;
   }
 
   .queue-filters {
@@ -2467,7 +2473,7 @@ legend {
 
   .report-preview .table-head,
   .report-preview .table-row {
-    min-width: 640px;
+    min-width: 400px;
   }
 
   .report-preview .table-head {
@@ -2493,8 +2499,8 @@ legend {
 
   .report-preview-table .table-head,
   .report-preview-table .table-row {
-    min-width: 680px;
-    grid-template-columns: 82px 96px 100px 1.2fr 78px 78px 88px 78px;
+    min-width: 400px;
+    grid-template-columns: 60px 1fr 60px 60px 70px;
   }
 
   input,

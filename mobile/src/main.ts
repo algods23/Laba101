@@ -2441,6 +2441,13 @@ function bindReportActions(orders: OrderRow[], payments: Payment[], sales: Daily
   });
   const dateFromInput = document.querySelector<HTMLInputElement>('[data-date-from]');
   const dateToInput = document.querySelector<HTMLInputElement>('[data-date-to]');
+  const customRadio = document.querySelector<HTMLInputElement>('[data-date-scope][value="custom"]');
+  if (dateFromInput && customRadio) {
+    dateFromInput.addEventListener('change', () => customRadio.checked = true);
+  }
+  if (dateToInput && customRadio) {
+    dateToInput.addEventListener('change', () => customRadio.checked = true);
+  }
   document.querySelectorAll<HTMLInputElement>('[data-date-scope]').forEach((input) => {
     input.addEventListener('change', () => {
       if (!input.checked || !dateFromInput || !dateToInput) return;
