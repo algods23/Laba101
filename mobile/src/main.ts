@@ -869,8 +869,8 @@ function renderOrders(orders: OrderRow[], staff: Staff[], services: LaundryServi
     const matchesPayment = !paymentFilter || orderPaymentStatus(order) === paymentFilter;
     return matchesQuery && matchesDate && matchesPayment;
   });
-  const unpaidOrders = filteredOrders.filter((order) => orderPaymentStatus(order) === 'unpaid');
-  const totalUnpaidAmount = unpaidOrders.reduce((sum, order) => sum + order.totalAmount, 0);
+  const unpaidOrders = filteredOrders.filter((order) => ['unpaid', 'partial'].includes(orderPaymentStatus(order)));
+  const totalUnpaidAmount = unpaidOrders.reduce((sum, order) => sum + Math.max(0, Number(order.balance || 0)), 0);
   const totalTransactionCount = filteredOrders.length;
 
   return `
@@ -966,7 +966,6 @@ function renderArchivedOrders(orders: OrderRow[], staff: Staff[], services: Laun
 
 function renderOrderRow(order: OrderRow, staff: Staff[], services: LaundryService[]) {
   const steps = workflowSteps(order, services);
-  const foldDone = order.workflowCompleted.includes('fold');
   const claimedDone = order.workflowCompleted.includes('claimed');
   const nextStep = steps.find((step) => !order.workflowCompleted.includes(step.key));
   const needsFoldStaff = nextStep?.key === 'fold';
@@ -998,13 +997,13 @@ function renderOrderRow(order: OrderRow, staff: Staff[], services: LaundryServic
       <td class="amount-cell"><strong>${money(order.totalAmount)}</strong><div class="small ${paymentStatus === 'paid' ? 'ok' : paymentStatus === 'partial' ? 'warn' : 'meta'}">${escapeHtml(paymentStatus)} &middot; Bal: ${money(order.balance)}</div></td>
       <td>
       <div class="row-actions">
-        ${!foldDone ? `<form class="inline-form advance-form flex-wrap" data-order-id="${order.id}">
+        ${nextStep?.key === 'fold' ? `<form class="inline-form advance-form flex-wrap" data-order-id="${order.id}">
           ${needsFoldStaff ? Array.from({ length: totalFolds }).map((_, i) => `<select name="assignedStaffId" required>
             <option value="">-- Staff ${totalFolds > 1 ? `(Fold ${i + 1})` : ''}--</option>
             ${staff.map((person) => `<option value="${person.id}">${escapeHtml(person.name)}</option>`).join('')}
           </select>`).join('') : ''}
           <button class="secondary" type="submit">Fold</button>
-        </form>` : !claimedDone ? `<form class="inline-form advance-form" data-order-id="${order.id}" data-action="claim" data-balance="${order.balance}">
+        </form>` : nextStep?.key === 'claimed' && !claimedDone ? `<form class="inline-form advance-form" data-order-id="${order.id}" data-action="claim" data-balance="${order.balance}">
           <button class="secondary" type="submit">Claim</button>
         </form>` : ''}
         ${order.balance > 0 ? `

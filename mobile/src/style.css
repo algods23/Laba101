@@ -1781,11 +1781,40 @@ legend {
 .orders-data-table {
   min-width: 0;
   font-size: 0.85rem;
+  border-collapse: collapse;
+  border-spacing: 0;
+  border: 1px solid #9fb0cc;
 }
 
 .orders-data-table th,
 .orders-data-table td {
   padding: 10px 12px;
+  border: 1px solid #9fb0cc;
+}
+
+.orders-data-table thead th:first-child,
+.orders-data-table thead th:last-child,
+.orders-data-table tbody td:first-child,
+.orders-data-table tbody td:last-child {
+  border-radius: 0;
+}
+
+.orders-data-table tbody td {
+  border-top: 1px solid #9fb0cc;
+  border-bottom: 1px solid #9fb0cc;
+}
+
+.orders-data-table tbody td:first-child {
+  border-left: 1px solid #9fb0cc;
+}
+
+.orders-data-table tbody td:last-child {
+  border-right: 1px solid #9fb0cc;
+}
+
+.orders-data-table .order-row-detail td {
+  border-top: 0;
+  background: #f8fbff;
 }
 
 .orders-data-table .small {

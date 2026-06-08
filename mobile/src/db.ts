@@ -896,10 +896,19 @@ export function calculatePricing(service: ServiceInput | ServiceInput[], categor
   };
 }
 
-export function workflowSteps(_order: Pick<OrderRow, 'serviceId' | 'serviceLines' | 'extras' | 'workflowCompleted'>, _services: LaundryService[]) {
-  // Simplified to fold → claimed only
+export function workflowSteps(order: Pick<OrderRow, 'serviceId' | 'serviceLines' | 'extras' | 'workflowCompleted'>, services: LaundryService[]) {
+  const serviceLines = order.serviceLines && order.serviceLines.length
+    ? order.serviceLines
+    : order.serviceId
+      ? [{ id: order.serviceId }]
+      : [];
+  const hasFoldService = serviceLines.some((line) => {
+    const service = services.find((item) => item.id === line.id);
+    return Array.isArray(service?.includes) && service.includes.includes('Fold');
+  });
+
   return [
-    { key: 'fold', label: 'Fold' },
+    ...(hasFoldService ? [{ key: 'fold', label: 'Fold' }] : []),
     { key: 'claimed', label: 'Claimed' },
   ];
 }
