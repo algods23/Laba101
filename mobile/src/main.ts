@@ -860,16 +860,18 @@ function renderPos(orders: OrderRow[], customers: Customer[], services: LaundryS
 
 function renderOrders(orders: OrderRow[], staff: Staff[], services: LaundryService[], payments: Payment[]) {
   const receipt = state.receiptOrderId ? orders.find((order) => order.id === state.receiptOrderId) : null;
-  const activeOrders = orders.filter((order) => order.status !== 'claimed');
   const query = state.orderSearch.trim().toLowerCase();
   const dateFilter = state.orderDateFilter.trim();
   const paymentFilter = state.orderPaymentFilter.trim().toLowerCase();
-  const filteredOrders = activeOrders.filter((order) => {
+  const filteredOrders = orders.filter((order) => {
     const matchesQuery = !query || [order.ticket, order.customer, order.phone, order.service, order.itemCategory, order.status].some((value) => String(value ?? '').toLowerCase().includes(query));
     const matchesDate = !dateFilter || localDateFromIso(order.createdAt) === dateFilter;
     const matchesPayment = !paymentFilter || orderPaymentStatus(order) === paymentFilter;
     return matchesQuery && matchesDate && matchesPayment;
   });
+  const unpaidOrders = filteredOrders.filter((order) => orderPaymentStatus(order) === 'unpaid');
+  const totalUnpaidAmount = unpaidOrders.reduce((sum, order) => sum + order.totalAmount, 0);
+  const totalTransactionCount = filteredOrders.length;
 
   return `
     <section class="grid content full">
@@ -898,19 +900,19 @@ function renderOrders(orders: OrderRow[], staff: Staff[], services: LaundryServi
             <button class="secondary" type="button" id="order-queue-clear">Clear</button>
           </div>
         </form>
-        <div class="summary-list queue-summary">
-          <div><span>Active queue</span><strong>${filteredOrders.length}</strong></div>
-          <div><span>Claimed archived</span><strong>${orders.filter((order) => order.status === 'claimed').length}</strong></div>
-        </div>
         <div style="overflow-x: auto; width: 100%; -webkit-overflow-scrolling: touch;">
-          <table class="data-table orders-data-table">
+          <table class="data-table orders-data-table bordered-table">
             <thead>
               <tr><th>Ticket</th><th>Customer</th><th>Service</th><th>Total Payment</th><th>Actions</th></tr>
             </thead>
             <tbody>
-              ${filteredOrders.map((order) => renderOrderRow(order, staff, services)).join('') || '<tr><td colspan="5" class="table-empty">No matching active orders.</td></tr>'}
+              ${filteredOrders.map((order) => renderOrderRow(order, staff, services)).join('') || '<tr><td colspan="5" class="table-empty">No matching orders.</td></tr>'}
             </tbody>
           </table>
+        </div>
+        <div class="summary-list queue-summary">
+          <div><span>Total transactions</span><strong>${totalTransactionCount}</strong></div>
+          <div><span>Total unpaid amount</span><strong>${money(totalUnpaidAmount)}</strong></div>
         </div>
       </article>
       ${receipt ? renderReceipt(receipt, payments.filter((payment) => payment.orderId === receipt.id)) : ''}
