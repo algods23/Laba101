@@ -1,4 +1,4 @@
-import './style.css';
+﻿import './style.css';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
@@ -855,6 +855,7 @@ function renderPos(orders: OrderRow[], customers: Customer[], services: LaundryS
       ${receipt ? renderReceipt(receipt, payments.filter((payment) => payment.orderId === receipt.id)) : ''}
     </section>
   `;
+}
 
 function renderOrders(orders: OrderRow[], staff: Staff[], services: LaundryService[], payments: Payment[]) {
   const receipt = state.receiptOrderId ? orders.find((order) => order.id === state.receiptOrderId) : null;
