@@ -84,6 +84,7 @@ export type OrderRow = {
   notes: string | null;
   foldedBy: number | null;
   foldedByName: string | null;
+  foldedByStaffIds: number[];
   dueAt: string;
   createdAt: string;
 };
@@ -529,6 +530,7 @@ async function ensureSchema() {
       extras TEXT,
       notes TEXT,
       foldedBy INTEGER,
+      foldedByStaffIds TEXT,
       dueAt TEXT,
       createdAt TEXT NOT NULL
     );
@@ -571,6 +573,7 @@ async function ensureSchema() {
   await addColumnIfMissing(db, 'orders', 'paidAmount', 'REAL NOT NULL DEFAULT 0');
   await addColumnIfMissing(db, 'orders', 'extras', 'TEXT');
   await addColumnIfMissing(db, 'orders', 'notes', 'TEXT');
+  await addColumnIfMissing(db, 'orders', 'foldedByStaffIds', 'TEXT');
   await addColumnIfMissing(db, 'orders', 'dueAt', 'TEXT');
   await addColumnIfMissing(db, 'orders', 'createdAt', 'TEXT NOT NULL DEFAULT ""');
   await addColumnIfMissing(db, 'daily_sales', 'saleNumber', 'TEXT');
@@ -604,8 +607,8 @@ async function ensureSchema() {
 
 async function insertNativeOrder(db: SQLiteDBConnection, order: OrderRow) {
   await db.run(
-    'INSERT INTO orders (id, ticket, customerId, customer, phone, serviceId, service, serviceLines, itemCategoryId, itemCategory, branch, status, workflowCompleted, weightKg, price, additionalCharge, extraServiceAmount, totalAmount, paidAmount, extras, notes, foldedBy, dueAt, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [order.id, order.ticket, order.customerId, order.customer, order.phone, order.serviceId, order.service, JSON.stringify(order.serviceLines ?? []), order.itemCategoryId, order.itemCategory, order.branch, order.status, JSON.stringify(order.workflowCompleted), order.weightKg, order.price, order.additionalCharge, order.extraServiceAmount, order.totalAmount, order.paidAmount, JSON.stringify(order.extras), order.notes, order.foldedBy, order.dueAt, order.createdAt],
+    'INSERT INTO orders (id, ticket, customerId, customer, phone, serviceId, service, serviceLines, itemCategoryId, itemCategory, branch, status, workflowCompleted, weightKg, price, additionalCharge, extraServiceAmount, totalAmount, paidAmount, extras, notes, foldedBy, foldedByStaffIds, dueAt, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [order.id, order.ticket, order.customerId, order.customer, order.phone, order.serviceId, order.service, JSON.stringify(order.serviceLines ?? []), order.itemCategoryId, order.itemCategory, order.branch, order.status, JSON.stringify(order.workflowCompleted), order.weightKg, order.price, order.additionalCharge, order.extraServiceAmount, order.totalAmount, order.paidAmount, JSON.stringify(order.extras), order.notes, order.foldedBy, JSON.stringify(order.foldedByStaffIds ?? []), order.dueAt, order.createdAt],
   );
 }
 
@@ -642,6 +645,7 @@ function hydrateOrder(row: Record<string, unknown>): OrderRow {
     notes: row.notes ? String(row.notes) : null,
     foldedBy: Number.isFinite(foldedBy) && foldedBy > 0 ? foldedBy : null,
     foldedByName: row.foldedByName ? String(row.foldedByName) : null,
+    foldedByStaffIds: parseJson<number[]>(row.foldedByStaffIds as string | null, []),
     dueAt: String(row.dueAt),
     createdAt: String(row.createdAt),
   };
@@ -892,24 +896,17 @@ export function calculatePricing(service: ServiceInput | ServiceInput[], categor
   };
 }
 
-export function workflowSteps(order: Pick<OrderRow, 'serviceId' | 'serviceLines' | 'extras' | 'workflowCompleted'>, services: LaundryService[]) {
-  const selectedServiceIds = order.serviceLines?.length ? order.serviceLines.map((line) => line.id) : [order.serviceId];
-  const selectedServices = services.filter((item) => selectedServiceIds.includes(item.id));
-  const includes = Array.from(new Set(selectedServices.flatMap((item) => item.includes ?? [])));
-  const steps = [{ key: 'received', label: 'Received' }];
-  if (includes.includes('Wash')) steps.push({ key: 'wash', label: 'Wash' });
-  if (order.extras.length) steps.push({ key: 'extras', label: 'Extra services' });
-  if (includes.includes('Dry') || selectedServices.some((service) => (service.dryingMinutes ?? 0) > 0)) steps.push({ key: 'dry', label: 'Dry' });
-  if (includes.includes('Fold')) steps.push({ key: 'fold', label: 'Fold' });
-  steps.push({ key: 'ready', label: 'Ready' }, { key: 'claimed', label: 'Claimed' });
-  return steps;
+export function workflowSteps(_order: Pick<OrderRow, 'serviceId' | 'serviceLines' | 'extras' | 'workflowCompleted'>, _services: LaundryService[]) {
+  // Simplified to fold → claimed only
+  return [
+    { key: 'fold', label: 'Fold' },
+    { key: 'claimed', label: 'Claimed' },
+  ];
 }
 
 function statusFromCompleted(completed: string[]) {
   if (completed.includes('claimed')) return 'claimed';
-  if (completed.includes('ready')) return 'ready';
-  if (completed.includes('dry')) return 'drying';
-  if (completed.includes('extras') || completed.includes('wash')) return 'washing';
+  if (completed.includes('fold')) return 'ready';
   return 'received';
 }
 
@@ -920,6 +917,7 @@ export async function listOrders(branch: string): Promise<OrderRow[]> {
       .map((order) => ({
         ...order,
         serviceLines: order.serviceLines ?? [{ id: order.serviceId, name: order.service, price: Number(order.price), quantity: 1, total: Number(order.price) }],
+        foldedByStaffIds: order.foldedByStaffIds ?? [],
         balance: Number((order.totalAmount - order.paidAmount).toFixed(2)),
       }));
   }
@@ -939,12 +937,14 @@ export async function createOrder(input: { customerId?: number; customerName: st
     ?? categories.find((item) => item.name.toLowerCase() === (service?.category ?? '').toLowerCase())
     ?? categories.find((item) => item.name === 'Regular Clothes')
     ?? categories[0];
-  if (!selectedServices.length || !service || !category) throw new Error('Please select at least one service.');
   const addonQuantities = input.addonQuantities ?? Object.fromEntries((input.addonIds ?? []).map((id) => [id, 1]));
   const addons = services
     .filter((item) => item.serviceType === 'addon' && Number(addonQuantities[item.id] ?? 0) > 0)
     .map((item) => ({ ...item, quantity: Number(addonQuantities[item.id] ?? 0) }));
-  const weightKg = input.weightKg ?? Math.max(1, Number(category.maxKg || service.maxKg || 1));
+  
+  if (!selectedServices.length && !addons.length) throw new Error('Please select at least one service or extra service.');
+  
+  const weightKg = input.weightKg ?? Math.max(1, Number(category?.maxKg || service?.maxKg || 1));
   const pricing = calculatePricing(selectedServices, category, weightKg, addons);
   const customer = await upsertCustomer({ id: input.customerId || undefined, name: input.customerName, phone: input.customerPhone ?? null });
   const tenderedAmount = Math.max(0, input.paidAmount);
@@ -954,8 +954,8 @@ export async function createOrder(input: { customerId?: number; customerName: st
     customerId: customer.id,
     customer: customer.name,
     phone: customer.phone,
-    serviceId: service.id,
-    service: pricing.serviceLines.map((line) => `${line.name} x${line.quantity}`).join(', '),
+    serviceId: service?.id ?? 0,
+    service: pricing.serviceLines.length ? pricing.serviceLines.map((line) => `${line.name} x${line.quantity}`).join(', ') : 'Extras only',
     serviceLines: pricing.serviceLines,
     itemCategoryId: category.id,
     itemCategory: category.name,
@@ -973,7 +973,8 @@ export async function createOrder(input: { customerId?: number; customerName: st
     notes: input.notes || null,
     foldedBy: null,
     foldedByName: null,
-    dueAt: new Date(Date.now() + Math.max(...selectedServices.map((item) => item.turnaroundHours)) * 60 * 60 * 1000).toISOString(),
+    foldedByStaffIds: [],
+    dueAt: new Date(Date.now() + Math.max(1, ...selectedServices.map((item) => item.turnaroundHours)) * 60 * 60 * 1000).toISOString(),
     createdAt: nowIso(),
   };
 
@@ -1012,7 +1013,13 @@ export async function advanceOrder(orderId: number, assignedStaffId?: number | n
   if (!next) return;
   order.workflowCompleted = [...order.workflowCompleted, next];
   order.status = statusFromCompleted(order.workflowCompleted);
-  if (next === 'fold' && assignedStaffId) order.foldedBy = assignedStaffId;
+  if (next === 'fold' && assignedStaffId) {
+    order.foldedBy = assignedStaffId;
+    // Append this staff ID once per load (each advance click = 1 load)
+    const ids = Array.isArray(order.foldedByStaffIds) ? [...order.foldedByStaffIds] : [];
+    ids.push(assignedStaffId);
+    order.foldedByStaffIds = ids;
+  }
   if (!Capacitor.isNativePlatform()) {
     const all = readBrowser<OrderRow[]>('orders', seedOrders);
     const existing = all.find((item) => item.id === order.id);
@@ -1021,7 +1028,10 @@ export async function advanceOrder(orderId: number, assignedStaffId?: number | n
     return;
   }
   const db = await ensureNativeDb();
-  await db.run('UPDATE orders SET workflowCompleted = ?, status = ?, foldedBy = ? WHERE id = ?', [JSON.stringify(order.workflowCompleted), order.status, order.foldedBy, order.id]);
+  await db.run(
+    'UPDATE orders SET workflowCompleted = ?, status = ?, foldedBy = ?, foldedByStaffIds = ? WHERE id = ?',
+    [JSON.stringify(order.workflowCompleted), order.status, order.foldedBy, JSON.stringify(order.foldedByStaffIds ?? []), order.id],
+  );
 }
 
 export async function recordPayment(orderId: number, input: { amount: number; method: 'cash' | 'gcash'; reference?: string | null }) {

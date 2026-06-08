@@ -192,17 +192,32 @@ function computeCashOnHandForDate(date: string, orders: OrderRow[], expenses: Di
   return computeCashOnHand(orderCash + manualCashAmount, dayDisbursements);
 }
 
-function foldCountRowsFromOrders(orders: OrderRow[]) {
-  const grouped = new Map<string, { staffName: string; folds: number }>();
+function foldCountRowsFromOrders(orders: OrderRow[], staff: Staff[]) {
+  const staffById = new Map(staff.map((s) => [s.id, s.name]));
+  // Count per staff per load: foldedByStaffIds records one entry per load folded by that staff
+  const grouped = new Map<number, { staffId: number; staffName: string; folds: number }>();
   orders
-    .filter((order) => order.workflowCompleted.includes('fold') && order.foldedByName)
+    .filter((order) => order.workflowCompleted.includes('fold'))
     .forEach((order) => {
-      const staffName = order.foldedByName as string;
-      const row = grouped.get(staffName) ?? { staffName, folds: 0 };
-      row.folds += 1;
-      grouped.set(staffName, row);
+      const staffIds: number[] = Array.isArray(order.foldedByStaffIds) && order.foldedByStaffIds.length
+        ? order.foldedByStaffIds
+        : order.foldedBy ? [order.foldedBy] : [];
+      staffIds.forEach((staffId) => {
+        if (!staffId) return;
+        const staffName = staffById.get(staffId) ?? String(staffId);
+        const row = grouped.get(staffId) ?? { staffId, staffName, folds: 0 };
+        row.folds += 1;
+        grouped.set(staffId, row);
+      });
     });
-  return Array.from(grouped.values());
+  // Resolve staff names from foldedByName when only one staff (legacy orders)
+  orders
+    .filter((order) => order.workflowCompleted.includes('fold') && order.foldedByName && order.foldedBy)
+    .forEach((order) => {
+      const row = grouped.get(order.foldedBy as number);
+      if (row && row.staffName === String(order.foldedBy)) row.staffName = order.foldedByName as string;
+    });
+  return Array.from(grouped.values()).map((r) => ({ staffName: r.staffName, folds: r.folds }));
 }
 
 function localDateInput(date = new Date()) {
@@ -324,12 +339,12 @@ function reportSelectionInRange(date: string, selection: { from: string; to: str
   return date >= selection.from && date <= selection.to;
 }
 
-function buildReportData(orders: OrderRow[], payments: Payment[], sales: DailySale[], expenses: DisbursementExpense[], revolvingHistory: RevolvingHistory[], foldRate: number, selection: { from: string; to: string; types: ReportType[] }) {
+function buildReportData(orders: OrderRow[], payments: Payment[], sales: DailySale[], expenses: DisbursementExpense[], revolvingHistory: RevolvingHistory[], staff: Staff[], foldRate: number, selection: { from: string; to: string; types: ReportType[] }) {
   const selectedTypes = new Set(selection.types);
   const salesOrders = orders.filter((order) => reportSelectionInRange(localDateFromIso(order.createdAt), selection));
   const manualSales = sales.filter((sale) => reportSelectionInRange(sale.saleDate, selection));
   const filteredExpenses = expenses.filter((expense) => reportSelectionInRange(expense.expenseDate, selection));
-  const filteredFoldCounts = foldCountRowsFromOrders(salesOrders);
+  const filteredFoldCounts = foldCountRowsFromOrders(salesOrders, staff);
   const paymentsByOrder = new Map<number, { cash: number; gcash: number }>();
   payments
     .filter((payment) => reportSelectionInRange(localDateFromIso(payment.receivedAt), selection))
@@ -646,7 +661,7 @@ async function render() {
         ${state.tab === 'customers' ? renderCustomers(data.customers, data.orders) : ''}
         ${state.tab === 'pricing' ? renderPricing(data.allServices, data.categories) : ''}
         ${state.tab === 'disbursements' ? renderDisbursements(data.expenses, data.sales) : ''}
-        ${state.tab === 'reports' ? renderReports(data.orders, data.payments, data.sales, data.expenses, data.revolvingHistory, data.foldRate, salesTotal, disbursementTotal, profit) : ''}
+        ${state.tab === 'reports' ? renderReports(data.orders, data.payments, data.sales, data.expenses, data.revolvingHistory, data.allStaff, data.foldRate, salesTotal, disbursementTotal, profit) : ''}
         ${state.tab === 'inventory' ? renderInventory(data.services, data.categories) : ''}
         ${state.tab === 'maintenance' ? renderMaintenance(data.machines, data.subcleanings, data.branch) : ''}
         ${state.tab === 'staff' ? renderStaff(data.allStaff, data.branch) : ''}
@@ -768,26 +783,28 @@ function renderPos(orders: OrderRow[], customers: Customer[], services: LaundryS
   const addons = services.filter((service) => service.serviceType === 'addon' && service.isActive);
   const receipt = state.receiptOrderId ? orders.find((order) => order.id === state.receiptOrderId) : null;
 
-  // Only show customers who have a prior order in this branch
-  const branchCustomerIds = new Set(orders.map((o) => o.customerId));
-  const branchCustomers = customers.filter((c) => branchCustomerIds.has(c.id));
-
   return `
     <section class="grid content full">
       <article class="panel span-2">
-        ${sectionTitle('New POS order', 'Tap a service, add extra quantities, and confirm the total')}
+        ${sectionTitle('New POS order', 'Search for a customer or type a new name, pick services and confirm')}
         <form id="order-form" class="form">
-          <div class="form-row">
-            <label>Existing customer (${escapeHtml(branch)})
-              <select name="customerId">
-                <option value="">-- New customer --</option>
-                ${branchCustomers.map((customer) => `<option value="${customer.id}" data-name="${escapeHtml(customer.name)}" data-phone="${escapeHtml(customer.phone ?? '')}">${escapeHtml(customer.name)} ${customer.phone ? `- ${escapeHtml(customer.phone)}` : ''}</option>`).join('')}
-              </select>
+          <div class="customer-autocomplete-wrap">
+            <label>Customer name
+              <div class="autocomplete-field">
+                <input
+                  id="customer-name-input"
+                  name="customerName"
+                  required
+                  placeholder="Type to search or add new customer…"
+                  autocomplete="off"
+                />
+                <div id="customer-suggestions" class="autocomplete-dropdown" hidden></div>
+              </div>
             </label>
-            <label>Customer name<input name="customerName" required placeholder="Customer name" /></label>
+            <input type="hidden" name="customerId" id="customer-id-input" value="" />
           </div>
           <div class="form-row">
-            <label>Phone<input name="customerPhone" placeholder="09..." /></label>
+            <label>Phone<input name="customerPhone" id="customer-phone-input" placeholder="09…" /></label>
           </div>
 
           <fieldset class="service-picker">
@@ -838,7 +855,6 @@ function renderPos(orders: OrderRow[], customers: Customer[], services: LaundryS
       ${receipt ? renderReceipt(receipt, payments.filter((payment) => payment.orderId === receipt.id)) : ''}
     </section>
   `;
-}
 
 function renderOrders(orders: OrderRow[], staff: Staff[], services: LaundryService[], payments: Payment[]) {
   const receipt = state.receiptOrderId ? orders.find((order) => order.id === state.receiptOrderId) : null;
@@ -941,11 +957,11 @@ function renderArchivedOrders(orders: OrderRow[], staff: Staff[], services: Laun
 
 function renderOrderRow(order: OrderRow, staff: Staff[], services: LaundryService[]) {
   const steps = workflowSteps(order, services);
+  const foldDone = order.workflowCompleted.includes('fold');
+  const claimedDone = order.workflowCompleted.includes('claimed');
   const nextStep = steps.find((step) => !order.workflowCompleted.includes(step.key));
   const needsFoldStaff = nextStep?.key === 'fold';
-  const needsExtraConfirmation = nextStep?.key === 'extras' && order.extras.length > 0;
   const paymentStatus = orderPaymentStatus(order);
-  const paymentClass = paymentStatus === 'paid' ? 'ok' : paymentStatus === 'partial' ? 'warn' : 'meta';
   const extrasLabel = order.extras.length
     ? order.extras.map((extra) => `${escapeHtml(cleanAddonName(extra.name))} x${Number(extra.quantity ?? 1)}`).join(', ')
     : '';
@@ -957,16 +973,17 @@ function renderOrderRow(order: OrderRow, staff: Staff[], services: LaundryServic
       <td><strong>${escapeHtml(order.ticket)}</strong><div class="small">${escapeHtml(formatDate(order.createdAt))}</div></td>
       <td>${escapeHtml(order.customer)}<div class="small">${escapeHtml(order.phone ?? '')}</div></td>
       <td>${escapeHtml(order.service)}${extrasLabel ? `<div class="small">Extras: ${extrasLabel}</div>` : ''}</td>
-      <td class="amount-cell"><strong>${money(order.totalAmount)}(${escapeHtml(paymentStatus)})</strong><div class="small">Paid: ${money(order.paidAmount)}, Bal: ${money(order.balance)}</div></td>
+      <td class="amount-cell"><strong>${money(order.totalAmount)}</strong><div class="small ${paymentStatus === 'paid' ? 'ok' : paymentStatus === 'partial' ? 'warn' : 'meta'}">${escapeHtml(paymentStatus)} &middot; Bal: ${money(order.balance)}</div></td>
       <td>
       <div class="row-actions">
-        ${nextStep ? `<form class="inline-form advance-form" data-order-id="${order.id}">
-          ${needsExtraConfirmation ? `<div class="extra-confirmation">Confirm extra service: <strong>${order.extras.map((extra) => `${escapeHtml(cleanAddonName(extra.name))} x${Number(extra.quantity ?? 1)}`).join(', ')}</strong></div>` : ''}
+        ${!foldDone ? `<form class="inline-form advance-form" data-order-id="${order.id}">
           ${needsFoldStaff ? `<select name="assignedStaffId" required>
-            <option value="">Staff</option>
+            <option value="">-- Staff --</option>
             ${staff.map((person) => `<option value="${person.id}">${escapeHtml(person.name)}</option>`).join('')}
           </select>` : ''}
-          <button class="secondary" type="submit">Next: ${escapeHtml(nextStep.label)}</button>
+          <button class="secondary" type="submit">Fold</button>
+        </form>` : !claimedDone ? `<form class="inline-form advance-form" data-order-id="${order.id}">
+          <button class="secondary" type="submit">Claim</button>
         </form>` : ''}
         ${order.balance > 0 ? `
           <form class="inline-form payment-form" data-order-id="${order.id}">
@@ -976,9 +993,9 @@ function renderOrderRow(order: OrderRow, staff: Staff[], services: LaundryServic
             <button class="secondary" type="submit">Pay</button>
           </form>
         ` : ''}
-        ${canCancel ? `<button class="secondary" type="button" data-cancel-order="${order.id}">Cancel</button>` : ''}
-        ${canDelete ? `<button class="secondary" type="button" data-delete-order="${order.id}">Delete</button>` : ''}
-        <button class="secondary" data-receipt="${order.id}">Receipt</button>
+        ${canCancel ? `<button class="secondary btn-sm" type="button" data-cancel-order="${order.id}">Cancel</button>` : ''}
+        ${canDelete ? `<button class="secondary btn-sm" type="button" data-delete-order="${order.id}">Delete</button>` : ''}
+        <button class="secondary btn-sm" data-receipt="${order.id}">Receipt</button>
       </div>
       </td>
     </tr>
@@ -1372,8 +1389,8 @@ function reportPreviewCell(value: string | number, index: number) {
   return escapeHtml(value ?? '');
 }
 
-function renderReports(orders: OrderRow[], payments: Payment[], sales: DailySale[], expenses: DisbursementExpense[], revolvingHistory: RevolvingHistory[], foldRate: number, salesTotal: number, disbursementTotal: number, profit: number) {
-  const preview = state.reportPreview ? buildReportData(orders, payments, sales, expenses, revolvingHistory, foldRate, state.reportPreview) : null;
+function renderReports(orders: OrderRow[], payments: Payment[], sales: DailySale[], expenses: DisbursementExpense[], revolvingHistory: RevolvingHistory[], staff: Staff[], foldRate: number, salesTotal: number, disbursementTotal: number, profit: number) {
+  const preview = state.reportPreview ? buildReportData(orders, payments, sales, expenses, revolvingHistory, staff, foldRate, state.reportPreview) : null;
   return `
     <section class="page-head">
       <div>
@@ -1872,20 +1889,60 @@ function bindOrderForms(data: Awaited<ReturnType<typeof loadData>>) {
   const form = document.querySelector<HTMLFormElement>('#order-form');
   const preview = document.querySelector<HTMLDivElement>('#price-preview');
   const saveButton = form?.querySelector<HTMLButtonElement>('button[type="submit"]');
-  const customerSelect = form?.querySelector<HTMLSelectElement>('select[name="customerId"]');
-  const customerName = form?.querySelector<HTMLInputElement>('input[name="customerName"]');
-  const customerPhone = form?.querySelector<HTMLInputElement>('input[name="customerPhone"]');
+  const customerNameInput = document.querySelector<HTMLInputElement>('#customer-name-input');
+  const customerIdInput = document.querySelector<HTMLInputElement>('#customer-id-input');
+  const customerPhoneInput = document.querySelector<HTMLInputElement>('#customer-phone-input');
+  const suggestionsBox = document.querySelector<HTMLDivElement>('#customer-suggestions');
   const orderError = form?.querySelector<HTMLElement>('[data-order-error]');
   const paymentMethod = form?.querySelector<HTMLSelectElement>('select[name="paymentMethod"]');
   const paymentReferenceWrap = form?.querySelector<HTMLElement>('.gcash-reference');
   const paymentReference = form?.querySelector<HTMLInputElement>('input[name="paymentReference"]');
   let orderSubmitAttempted = false;
-  const syncCustomer = () => {
-    if (!customerSelect || !customerName || !customerPhone) return;
-    const option = customerSelect.selectedOptions[0];
-    customerName.value = option?.dataset.name ?? '';
-    customerPhone.value = option?.dataset.phone ?? '';
+
+  /* ───── Customer autocomplete ───── */
+  let acDebounce: number | undefined;
+  const showSuggestions = (query: string) => {
+    if (!suggestionsBox || !customerNameInput) return;
+    const q = query.trim().toLowerCase();
+    if (!q) { suggestionsBox.hidden = true; return; }
+    const matches = data.customers
+      .filter((c) => c.name.toLowerCase().includes(q) || (c.phone ?? '').includes(q))
+      .slice(0, 8);
+    const addNewHtml = `<div class="ac-item ac-add" data-ac-new="true"><strong>+ Add new: "${escapeHtml(query.trim())}"</strong></div>`;
+    const matchHtml = matches.map((c) =>
+      `<div class="ac-item" data-ac-id="${c.id}" data-ac-name="${escapeHtml(c.name)}" data-ac-phone="${escapeHtml(c.phone ?? '')}"><strong>${escapeHtml(c.name)}</strong>${c.phone ? `<span>${escapeHtml(c.phone)}</span>` : ''}</div>`
+    ).join('');
+    suggestionsBox.innerHTML = matchHtml + addNewHtml;
+    suggestionsBox.hidden = false;
   };
+  customerNameInput?.addEventListener('input', () => {
+    if (customerIdInput) customerIdInput.value = '';
+    clearTimeout(acDebounce);
+    acDebounce = window.setTimeout(() => showSuggestions(customerNameInput.value), 150);
+  });
+  customerNameInput?.addEventListener('focus', () => {
+    if (customerNameInput.value.trim()) showSuggestions(customerNameInput.value);
+  });
+  suggestionsBox?.addEventListener('click', (event) => {
+    const item = (event.target as HTMLElement).closest<HTMLElement>('.ac-item');
+    if (!item) return;
+    if (item.dataset.acNew === 'true') {
+      // Keep name as-is, clear id so a new customer will be created
+      if (customerIdInput) customerIdInput.value = '';
+    } else {
+      if (customerNameInput) customerNameInput.value = item.dataset.acName ?? '';
+      if (customerPhoneInput) customerPhoneInput.value = item.dataset.acPhone ?? '';
+      if (customerIdInput) customerIdInput.value = item.dataset.acId ?? '';
+    }
+    if (suggestionsBox) suggestionsBox.hidden = true;
+  });
+  document.addEventListener('click', (event) => {
+    if (suggestionsBox && !suggestionsBox.contains(event.target as Node) && event.target !== customerNameInput) {
+      suggestionsBox.hidden = true;
+    }
+  });
+
+  /* ───── GCash reference toggle ───── */
   const syncGcashReference = () => {
     const isGcash = paymentMethod?.value === 'gcash';
     if (paymentReferenceWrap) paymentReferenceWrap.hidden = !isGcash;
@@ -1894,6 +1951,8 @@ function bindOrderForms(data: Awaited<ReturnType<typeof loadData>>) {
       if (!isGcash) paymentReference.value = '';
     }
   };
+
+  /* ───── Quantity +/- helpers ───── */
   const setQuantity = (name: string, delta: number) => {
     if (!form) return;
     const input = form.querySelector<HTMLInputElement>(`input[name="${name}"]`);
@@ -1921,42 +1980,60 @@ function bindOrderForms(data: Awaited<ReturnType<typeof loadData>>) {
   form?.querySelectorAll<HTMLButtonElement>('[data-qty-minus]').forEach((button) => {
     button.addEventListener('click', () => setQuantity(button.dataset.qtyMinus ?? '', -1));
   });
+
+  /* ───── Price preview (supports addon-only) ───── */
   const refreshPreview = () => {
     if (!form || !preview) return;
     const selectedServices = serviceInputsFromForm(form, data.services);
     const primaryService = selectedServices[0];
     const category = defaultCategoryForService(primaryService, data.categories);
     const addons = addonInputsFromForm(form, data.services);
-    if (!selectedServices.length || !primaryService || !category) {
+    const hasServices = selectedServices.length > 0 && primaryService && category;
+    const hasAddons = addons.length > 0;
+
+    if (!hasServices && !hasAddons) {
       if (saveButton) saveButton.disabled = true;
       if (orderError) {
         orderError.hidden = !orderSubmitAttempted;
-        orderError.textContent = orderSubmitAttempted ? 'Please select at least one service quantity.' : '';
+        orderError.textContent = orderSubmitAttempted ? 'Please select at least one service or extra service.' : '';
       }
       preview.innerHTML = '<div class="preview-total"><span>Total amount</span><strong>PHP 0.00</strong></div>';
       return;
     }
-    const price = calculatePricing(selectedServices, category, defaultWeightForService(primaryService, category), addons);
-    const selectedServiceLabels = price.serviceLines.map((line) => `${line.name} x${line.quantity}`);
-    const selectedExtras = price.extras.map((addon) => `${cleanAddonName(addon.name)} x${addon.quantity}`);
-    if (saveButton) saveButton.disabled = false;
-    if (orderError) {
-      orderError.hidden = true;
-      orderError.textContent = '';
+
+    if (hasServices) {
+      const price = calculatePricing(selectedServices, category!, defaultWeightForService(primaryService!, category!), addons);
+      const selectedServiceLabels = price.serviceLines.map((line) => `${line.name} x${line.quantity}`);
+      const selectedExtras = price.extras.map((addon) => `${cleanAddonName(addon.name)} x${addon.quantity}`);
+      if (saveButton) saveButton.disabled = false;
+      if (orderError) { orderError.hidden = true; orderError.textContent = ''; }
+      preview.classList.remove('has-error');
+      preview.innerHTML = `
+        <div class="preview-line"><span>Services${selectedServiceLabels.length ? ` (${escapeHtml(selectedServiceLabels.join(', '))})` : ''}</span><strong>${money(price.price)}</strong></div>
+        ${price.extraServiceAmount > 0 ? `<div class="preview-line"><span>Extra services${selectedExtras.length ? ` (${escapeHtml(selectedExtras.join(', '))})` : ''}</span><strong>${money(price.extraServiceAmount)}</strong></div>` : ''}
+        <div class="preview-total"><span>Total amount</span><strong>${money(price.totalAmount)}</strong></div>
+      `;
+    } else {
+      // Addon-only order – compute extras total manually
+      const extrasTotal = addons.reduce((sum, a) => sum + (a.price * (a.quantity ?? 1)), 0);
+      const selectedExtras = addons.map((addon) => `${cleanAddonName(addon.name)} x${addon.quantity ?? 1}`);
+      if (saveButton) saveButton.disabled = false;
+      if (orderError) { orderError.hidden = true; orderError.textContent = ''; }
+      preview.classList.remove('has-error');
+      preview.innerHTML = `
+        <div class="preview-line"><span>Extra services (${escapeHtml(selectedExtras.join(', '))})</span><strong>${money(extrasTotal)}</strong></div>
+        <div class="preview-total"><span>Total amount</span><strong>${money(extrasTotal)}</strong></div>
+      `;
     }
-    preview.classList.remove('has-error');
-    preview.innerHTML = `
-      <div class="preview-line"><span>Services${selectedServiceLabels.length ? ` (${escapeHtml(selectedServiceLabels.join(', '))})` : ''}</span><strong>${money(price.price)}</strong></div>
-      ${price.extraServiceAmount > 0 ? `<div class="preview-line"><span>Extra services${selectedExtras.length ? ` (${escapeHtml(selectedExtras.join(', '))})` : ''}</span><strong>${money(price.extraServiceAmount)}</strong></div>` : ''}
-      <div class="preview-total"><span>Total amount</span><strong>${money(price.totalAmount)}</strong></div>
-    `;
   };
-  customerSelect?.addEventListener('change', syncCustomer);
+
   paymentMethod?.addEventListener('change', syncGcashReference);
   syncGcashReference();
   form?.addEventListener('input', refreshPreview);
   form?.addEventListener('change', refreshPreview);
   refreshPreview();
+
+  /* ───── Form submit ───── */
   form?.addEventListener('submit', async (event) => {
     event.preventDefault();
     orderSubmitAttempted = true;
@@ -1965,15 +2042,20 @@ function bindOrderForms(data: Awaited<ReturnType<typeof loadData>>) {
     const primaryService = selectedServices[0];
     const category = defaultCategoryForService(primaryService, data.categories);
     const addons = addonInputsFromForm(form, data.services);
-    if (!selectedServices.length || !primaryService || !category) {
+    const hasServices = selectedServices.length > 0 && primaryService && category;
+    const hasAddons = addons.length > 0;
+
+    if (!hasServices && !hasAddons) {
       if (orderError) {
         orderError.hidden = false;
-        orderError.textContent = 'Please select at least one service quantity.';
+        orderError.textContent = 'Please select at least one service or extra service.';
       }
       return;
     }
     const selectedServiceLabels = selectedServices.map((service) => `${service.name} x${service.quantity}`).join(', ');
-    const totalPreview = calculatePricing(selectedServices, category, defaultWeightForService(primaryService, category), addons);
+    const totalPreview = hasServices 
+      ? calculatePricing(selectedServices, category!, defaultWeightForService(primaryService!, category!), addons)
+      : calculatePricing([], data.categories[0], 1, addons);
     if (!confirm(`Save this order?\n\nServices: ${selectedServiceLabels}\nTotal: ${money(totalPreview.totalAmount)}`)) return;
     try {
       const order = await createOrder({
@@ -1982,8 +2064,8 @@ function bindOrderForms(data: Awaited<ReturnType<typeof loadData>>) {
         customerPhone: String(fd.get('customerPhone') ?? '') || null,
         serviceQuantities: serviceQuantitiesFromForm(form, data.services),
         branch: data.branch,
-        itemCategoryId: category?.id,
-        weightKg: primaryService && category ? defaultWeightForService(primaryService, category) : undefined,
+        itemCategoryId: category?.id ?? data.categories[0].id,
+        weightKg: primaryService && category ? defaultWeightForService(primaryService, category) : 1,
         addonQuantities: addonQuantitiesFromForm(form, data.services),
         paidAmount: Number(fd.get('paidAmount') ?? 0),
         paymentMethod: String(fd.get('paymentMethod') ?? 'cash') as 'cash' | 'gcash',
@@ -2678,22 +2760,24 @@ function bindSettingsForms() {
     await setSetting('fold_rate', String(fd.get('foldRate') ?? '5'));
     if (String(fd.get('reportEmail') ?? '')) await setSetting('report_email', String(fd.get('reportEmail')));
     alert('Settings saved successfully!');
-    await render();
   });
 }
 
-await initOfflineStore();
-const savedSession = localStorage.getItem(sessionKey);
-if (savedSession) {
-  try {
-    const parsed = JSON.parse(savedSession) as { email?: string; remembered?: boolean };
-    if (parsed.email && parsed.remembered) {
-      const user = (await authenticateUser(parsed.email, 'password')) ?? null;
-      state.currentUser = user;
+async function initApp() {
+  await initOfflineStore();
+  const savedSession = localStorage.getItem(sessionKey);
+  if (savedSession) {
+    try {
+      const parsed = JSON.parse(savedSession) as { email?: string; remembered?: boolean };
+      if (parsed.email && parsed.remembered) {
+        const user = (await authenticateUser(parsed.email, 'password')) ?? null;
+        state.currentUser = user;
+      }
+    } catch {
+      localStorage.removeItem(sessionKey);
     }
-  } catch {
-    localStorage.removeItem(sessionKey);
   }
+  await render();
 }
 
 function renderRevolving(sales: DailySale[], revolvingHistory: RevolvingHistory[], orders: OrderRow[], expenses: DisbursementExpense[]) {
@@ -2998,4 +3082,4 @@ function bindRevolvingForms() {
   }
 }
 
-await render();
+initApp();

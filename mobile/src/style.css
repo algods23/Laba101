@@ -2533,6 +2533,33 @@ legend {
   }
 }
 
+/* Custom Order Queue Table Mobile Responsiveness */
+.orders-data-table {
+  width: 100%;
+}
+.orders-data-table th, .orders-data-table td {
+  padding: 8px 6px;
+  font-size: 0.85rem;
+}
+.orders-data-table .row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.orders-data-table .row-actions button,
+.orders-data-table .row-actions select,
+.orders-data-table .row-actions input {
+  padding: 4px 8px;
+  font-size: 0.75rem;
+  height: 28px;
+  min-height: 28px;
+}
+.orders-data-table .inline-form {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 @media print {
   body * {
     visibility: hidden;
