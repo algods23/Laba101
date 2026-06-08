@@ -1003,7 +1003,7 @@ export async function nextOrderNumber() {
   return `${prefix}-${String(next).padStart(3, '0')}`;
 }
 
-export async function advanceOrder(orderId: number, assignedStaffId?: number | null) {
+export async function advanceOrder(orderId: number, assignedStaffId?: number | null | number[]) {
   const branch = await getBranch();
   const [orders, services] = await Promise.all([listOrders(branch), listServices()]);
   const order = orders.find((item) => item.id === orderId);
@@ -1014,10 +1014,11 @@ export async function advanceOrder(orderId: number, assignedStaffId?: number | n
   order.workflowCompleted = [...order.workflowCompleted, next];
   order.status = statusFromCompleted(order.workflowCompleted);
   if (next === 'fold' && assignedStaffId) {
-    order.foldedBy = assignedStaffId;
-    // Append this staff ID once per load (each advance click = 1 load)
+    const assignedIds = Array.isArray(assignedStaffId) ? assignedStaffId : [assignedStaffId];
+    order.foldedBy = assignedIds[0] || null;
+    // Append these staff IDs (one per load folded by that staff)
     const ids = Array.isArray(order.foldedByStaffIds) ? [...order.foldedByStaffIds] : [];
-    ids.push(assignedStaffId);
+    ids.push(...assignedIds);
     order.foldedByStaffIds = ids;
   }
   if (!Capacitor.isNativePlatform()) {

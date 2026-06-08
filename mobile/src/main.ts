@@ -1,4 +1,4 @@
-﻿import './style.css';
+import './style.css';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
@@ -901,14 +901,16 @@ function renderOrders(orders: OrderRow[], staff: Staff[], services: LaundryServi
           <div><span>Active queue</span><strong>${filteredOrders.length}</strong></div>
           <div><span>Claimed archived</span><strong>${orders.filter((order) => order.status === 'claimed').length}</strong></div>
         </div>
-        <table class="data-table orders-data-table">
-          <thead>
-            <tr><th>Ticket</th><th>Customer</th><th>Service</th><th>Total Payment</th><th>Actions</th></tr>
-          </thead>
-          <tbody>
-            ${filteredOrders.map((order) => renderOrderRow(order, staff, services)).join('') || '<tr><td colspan="5" class="table-empty">No matching active orders.</td></tr>'}
-          </tbody>
-        </table>
+        <div style="overflow-x: auto; width: 100%; -webkit-overflow-scrolling: touch;">
+          <table class="data-table orders-data-table">
+            <thead>
+              <tr><th>Ticket</th><th>Customer</th><th>Service</th><th>Total Payment</th><th>Actions</th></tr>
+            </thead>
+            <tbody>
+              ${filteredOrders.map((order) => renderOrderRow(order, staff, services)).join('') || '<tr><td colspan="5" class="table-empty">No matching active orders.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
       </article>
       ${receipt ? renderReceipt(receipt, payments.filter((payment) => payment.orderId === receipt.id)) : ''}
     </section>
@@ -942,14 +944,16 @@ function renderArchivedOrders(orders: OrderRow[], staff: Staff[], services: Laun
           <div><span>Archived claims</span><strong>${filteredArchivedOrders.length}</strong></div>
           <div><span>Total claimed</span><strong>${archivedOrders.length}</strong></div>
         </div>
-        <table class="data-table orders-data-table archived-orders-table">
-          <thead>
-            <tr><th>Ticket</th><th>Customer</th><th>Service</th><th>Total Payment</th><th>Actions</th></tr>
-          </thead>
-          <tbody>
-            ${filteredArchivedOrders.map((order) => renderOrderRow(order, staff, services)).join('') || '<tr><td colspan="5" class="table-empty">No archived orders found.</td></tr>'}
-          </tbody>
-        </table>
+        <div style="overflow-x: auto; width: 100%; -webkit-overflow-scrolling: touch;">
+          <table class="data-table orders-data-table archived-orders-table">
+            <thead>
+              <tr><th>Ticket</th><th>Customer</th><th>Service</th><th>Total Payment</th><th>Actions</th></tr>
+            </thead>
+            <tbody>
+              ${filteredArchivedOrders.map((order) => renderOrderRow(order, staff, services)).join('') || '<tr><td colspan="5" class="table-empty">No archived orders found.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
       </article>
       ${receipt ? renderReceipt(receipt, payments.filter((payment) => payment.orderId === receipt.id)) : ''}
     </section>
@@ -969,6 +973,19 @@ function renderOrderRow(order: OrderRow, staff: Staff[], services: LaundryServic
   const isAdmin = state.currentUser?.role === 'admin';
   const canCancel = order.status !== 'claimed' && order.paidAmount <= 0;
   const canDelete = order.status !== 'claimed' && isAdmin && order.paidAmount > 0;
+  
+  let totalFolds = 1;
+  if (order.serviceLines) {
+    let folds = 0;
+    order.serviceLines.forEach(line => {
+      const srv = services.find(s => s.id === line.id);
+      if (srv && Array.isArray(srv.includes) && srv.includes.includes('Fold')) {
+        folds += line.quantity;
+      }
+    });
+    if (folds > 0) totalFolds = folds;
+  }
+
   return `
     <tr class="order-row-main">
       <td><strong>${escapeHtml(order.ticket)}</strong><div class="small">${escapeHtml(formatDate(order.createdAt))}</div></td>
@@ -977,11 +994,11 @@ function renderOrderRow(order: OrderRow, staff: Staff[], services: LaundryServic
       <td class="amount-cell"><strong>${money(order.totalAmount)}</strong><div class="small ${paymentStatus === 'paid' ? 'ok' : paymentStatus === 'partial' ? 'warn' : 'meta'}">${escapeHtml(paymentStatus)} &middot; Bal: ${money(order.balance)}</div></td>
       <td>
       <div class="row-actions">
-        ${!foldDone ? `<form class="inline-form advance-form" data-order-id="${order.id}">
-          ${needsFoldStaff ? `<select name="assignedStaffId" required>
-            <option value="">-- Staff --</option>
+        ${!foldDone ? `<form class="inline-form advance-form flex-wrap" data-order-id="${order.id}">
+          ${needsFoldStaff ? Array.from({ length: totalFolds }).map((_, i) => `<select name="assignedStaffId" required>
+            <option value="">-- Staff ${totalFolds > 1 ? `(Fold ${i + 1})` : ''}--</option>
             ${staff.map((person) => `<option value="${person.id}">${escapeHtml(person.name)}</option>`).join('')}
-          </select>` : ''}
+          </select>`).join('') : ''}
           <button class="secondary" type="submit">Fold</button>
         </form>` : !claimedDone ? `<form class="inline-form advance-form" data-order-id="${order.id}">
           <button class="secondary" type="submit">Claim</button>
@@ -2086,7 +2103,9 @@ function bindOrderForms(data: Awaited<ReturnType<typeof loadData>>) {
     advanceForm.addEventListener('submit', async (event) => {
       event.preventDefault();
       const fd = new FormData(advanceForm);
-      await advanceOrder(Number(advanceForm.dataset.orderId), Number(fd.get('assignedStaffId')) || null);
+      const staffIds = fd.getAll('assignedStaffId').map(Number).filter((id) => id > 0);
+      const assigned = staffIds.length > 0 ? staffIds : null;
+      await advanceOrder(Number(advanceForm.dataset.orderId), assigned);
       await render();
     });
   });
