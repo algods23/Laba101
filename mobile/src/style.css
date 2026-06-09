@@ -2595,6 +2595,82 @@ legend {
   gap: 4px;
 }
 
+.payment-cell.status-paid,
+.payment-cell.status-paid strong,
+.payment-cell.status-paid .payment-status {
+  color: #047857;
+}
+
+.payment-cell.status-partial,
+.payment-cell.status-partial strong,
+.payment-cell.status-partial .payment-status {
+  color: #b7791f;
+}
+
+.payment-cell.status-unpaid,
+.payment-cell.status-unpaid strong,
+.payment-cell.status-unpaid .payment-status {
+  color: #dc2626;
+}
+
+.dashboard-summary-modal {
+  max-width: 2.45in;
+}
+
+.dashboard-summary-slip {
+  display: grid;
+  gap: 8px;
+}
+
+.dashboard-summary-slip h3,
+.dashboard-summary-slip p {
+  margin: 0;
+  text-align: center;
+}
+
+.dashboard-summary-slip div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dashboard-summary-slip .signature-row {
+  justify-content: flex-end;
+  min-height: 52px;
+  margin-top: 14px;
+  border-top: 1px solid #111;
+  text-align: right;
+}
+
+.maintenance-calendar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.calendar-day {
+  min-height: 92px;
+  border: 1px solid var(--soft-line);
+  background: #fff;
+  padding: 10px;
+  display: grid;
+  gap: 4px;
+}
+
+.calendar-day.has-records {
+  border-color: #047857;
+  background: #ecfdf5;
+}
+
+.calendar-day strong {
+  color: var(--navy);
+}
+
+.calendar-day span {
+  color: #047857;
+  font-weight: 800;
+}
+
 @media print {
   body * {
     visibility: hidden;

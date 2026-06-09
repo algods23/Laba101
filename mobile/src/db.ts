@@ -176,6 +176,18 @@ export type InventoryItem = {
   updatedAt: string;
 };
 
+export type InventoryMovement = {
+  id: number;
+  itemId: number;
+  itemName: string;
+  movementType: 'in' | 'out';
+  quantity: number;
+  notes: string | null;
+  staffName: string;
+  branch: string;
+  createdAt: string;
+};
+
 type AppSetting = {
   key: string;
   value: string;
@@ -224,8 +236,9 @@ const seedServices: LaundryService[] = [
   serviceSeed(6, 'Dry 10 mins', 'Additional drying time (10 mins).', 'Add-on', 'addon', 30, 8, 10, ['Dry'], 0, 1),
   serviceSeed(7, 'Dry 20 mins', 'Additional drying time (20 mins).', 'Add-on', 'addon', 50, 8, 20, ['Dry'], 0, 1),
   serviceSeed(8, 'Dry 40 mins', 'Additional drying time (40 mins).', 'Add-on', 'addon', 70, 8, 40, ['Dry'], 0, 1),
-  serviceSeed(9, 'Additional Zonrox', 'Extra Zonrox bleach add-on per load.', 'Add-on', 'addon', 25, 0, null, ['Zonrox'], 0, 0),
-  serviceSeed(10, 'Additional Fabcon', 'Extra Fabcon fabric conditioner add-on per load.', 'Add-on', 'addon', 25, 0, null, ['Fabcon'], 0, 0),
+  serviceSeed(9, 'Additional Zonrox', 'Extra Zonrox bleach add-on per load.', 'Add-on', 'addon', 10, 0, null, ['Zonrox'], 0, 0),
+  serviceSeed(10, 'Additional Fabcon', 'Extra Fabcon fabric conditioner add-on per load.', 'Add-on', 'addon', 10, 0, null, ['Fabcon'], 0, 0),
+  serviceSeed(11, 'Additional Finishing', 'Extra finishing spray add-on per load.', 'Add-on', 'addon', 20, 0, null, ['Finishing'], 0, 0),
 ];
 
 const seedItemCategories: ItemCategory[] = [
@@ -576,6 +589,7 @@ async function ensureSchema() {
     CREATE TABLE IF NOT EXISTS subcleanings (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL, machineIds TEXT NOT NULL, machineNames TEXT NOT NULL, cleaningStatus TEXT NOT NULL, cleaningType TEXT NOT NULL DEFAULT 'tube', notes TEXT, branch TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS activity_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL, staffId INTEGER, staffName TEXT NOT NULL, action TEXT NOT NULL, details TEXT, branch TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS inventory_items (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, unit TEXT NOT NULL, quantity REAL NOT NULL DEFAULT 0, reorderLevel REAL NOT NULL DEFAULT 0, notes TEXT, branch TEXT NOT NULL, updatedAt TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS inventory_movements (id INTEGER PRIMARY KEY AUTOINCREMENT, itemId INTEGER NOT NULL, itemName TEXT NOT NULL, movementType TEXT NOT NULL, quantity REAL NOT NULL, notes TEXT, staffName TEXT NOT NULL, branch TEXT NOT NULL, createdAt TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
   `);
 
@@ -1475,6 +1489,42 @@ export async function saveInventoryItem(input: { id?: number; name: string; unit
   } else {
     await db.run('INSERT INTO inventory_items (name, unit, quantity, reorderLevel, notes, branch, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)', [row.name, row.unit, row.quantity, row.reorderLevel, row.notes, row.branch, row.updatedAt]);
   }
+}
+
+export async function listInventoryMovements(branch: string): Promise<InventoryMovement[]> {
+  if (!Capacitor.isNativePlatform()) return readBrowser<InventoryMovement[]>('inventory_movements', []).filter((item) => item.branch === branch).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const db = await ensureNativeDb();
+  const result = await db.query('SELECT id, itemId, itemName, movementType, quantity, notes, staffName, branch, createdAt FROM inventory_movements WHERE branch = ? ORDER BY createdAt DESC, id DESC', [branch]);
+  return (result.values ?? []) as InventoryMovement[];
+}
+
+export async function recordInventoryMovement(input: { itemId: number; movementType: 'in' | 'out'; quantity: number; notes: string; staffName: string; branch: string }) {
+  const quantity = Math.max(0, Number(input.quantity || 0));
+  if (quantity <= 0) throw new Error('Quantity must be greater than zero.');
+  const items = await listInventoryItems(input.branch);
+  const item = items.find((entry) => entry.id === input.itemId);
+  if (!item) throw new Error('Inventory item not found.');
+  const nextQuantity = input.movementType === 'in' ? item.quantity + quantity : item.quantity - quantity;
+  if (nextQuantity < 0) throw new Error('Stock-out quantity is greater than current stock.');
+  const movement = { itemId: item.id, itemName: item.name, movementType: input.movementType, quantity, notes: input.notes || null, staffName: input.staffName, branch: input.branch, createdAt: nowIso() };
+
+  if (!Capacitor.isNativePlatform()) {
+    const allItems = readBrowser<InventoryItem[]>('inventory_items', []);
+    const existing = allItems.find((entry) => entry.id === item.id);
+    if (existing) {
+      existing.quantity = Number(nextQuantity.toFixed(2));
+      existing.updatedAt = movement.createdAt;
+    }
+    writeBrowser('inventory_items', allItems);
+    const movements = readBrowser<InventoryMovement[]>('inventory_movements', []);
+    movements.unshift({ id: nextNumericId(movements), ...movement });
+    writeBrowser('inventory_movements', movements);
+    return;
+  }
+
+  const db = await ensureNativeDb();
+  await db.run('UPDATE inventory_items SET quantity = ?, updatedAt = ? WHERE id = ?', [Number(nextQuantity.toFixed(2)), movement.createdAt, item.id]);
+  await db.run('INSERT INTO inventory_movements (itemId, itemName, movementType, quantity, notes, staffName, branch, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [movement.itemId, movement.itemName, movement.movementType, movement.quantity, movement.notes, movement.staffName, movement.branch, movement.createdAt]);
 }
 
 export async function saveMachine(input: { machineName: string; machineType: 'washer' | 'dryer'; status: 'available' | 'under_cleaning' | 'maintenance'; branch: string }) {

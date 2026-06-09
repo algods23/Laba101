@@ -25,6 +25,7 @@ import {
   listFoldLogs,
   listItemCategories,
   listInventoryItems,
+  listInventoryMovements,
   listMachines,
   listOrders,
   listPayments,
@@ -39,6 +40,7 @@ import {
   saveDailySale,
   saveItemCategory,
   saveInventoryItem,
+  recordInventoryMovement,
   saveMachine,
   saveService,
   saveSubcleaning,
@@ -58,6 +60,7 @@ import {
   type FoldLog,
   type ItemCategory,
   type InventoryItem,
+  type InventoryMovement,
   type LaundryService,
   type Machine,
   type OrderRow,
@@ -152,6 +155,7 @@ const state = {
   selectedPrinterAddress: '',
   archivedOrderSearch: '',
   paymentModalOrderId: 0,
+  dashboardSummaryModalOpen: false,
   reportPreview: null as ReportPreviewState | null,
   endorseModalOpen: false,
   endorseSaleId: 0,
@@ -164,7 +168,7 @@ const state = {
   revolvingHistoryTo: '',
 };
 
-const serviceIncludeOptions = ['Wash', 'Dry', 'Fold', 'Detergent', 'Fabcon', 'Zonrox'] as const;
+const serviceIncludeOptions = ['Wash', 'Dry', 'Fold', 'Detergent', 'Fabcon', 'Zonrox', 'Finishing'] as const;
 const disbursementCategories = ['Supplies', 'Utilities', 'Maintenance', 'Salary', 'Rent', 'Transport', 'Other'];
 
 const sessionKey = 'laba101-mobile-session';
@@ -319,6 +323,11 @@ async function recordUiLog(action: string, details = '') {
     details,
     branch: await getBranch(),
   });
+}
+
+async function verifyAdminPassword(password: string) {
+  const admins = (await listAllStaff()).filter((person) => person.role === 'admin' && person.isActive !== 0);
+  return admins.some((admin) => admin.password === password);
 }
 
 function renderHtmlTable(headers: string[], bodyRows: string[][], tableClass = 'data-table') {
@@ -580,11 +589,12 @@ async function loadData() {
   const subcleanings = await listSubcleanings(branch);
   const activityLogs = await listActivityLogs(branch);
   const inventoryItems = await listInventoryItems(branch);
+  const inventoryMovements = await listInventoryMovements(branch);
   const revolvingHistory = await listRevolvingHistory();
   const foldRate = await getFoldRate();
   const reportEmail = await getSetting('report_email');
 
-  return { branch, staff, allStaff, customers, services, allServices, categories, orders, payments, foldLogs, expenses, sales, machines, subcleanings, activityLogs, inventoryItems, revolvingHistory, foldRate, reportEmail: reportEmail ?? '' };
+  return { branch, staff, allStaff, customers, services, allServices, categories, orders, payments, foldLogs, expenses, sales, machines, subcleanings, activityLogs, inventoryItems, inventoryMovements, revolvingHistory, foldRate, reportEmail: reportEmail ?? '' };
 }
 
 async function render() {
@@ -686,7 +696,7 @@ async function render() {
         ${state.tab === 'disbursements' ? renderDisbursements(data.expenses, data.sales) : ''}
         ${state.tab === 'reports' ? renderReports(data.orders, data.payments, data.sales, data.expenses, data.revolvingHistory, data.allStaff, data.foldRate, salesTotal, disbursementTotal, profit) : ''}
         ${state.tab === 'logs' ? renderLogs(data.activityLogs) : ''}
-        ${state.tab === 'inventory' ? renderInventory(data.inventoryItems, data.branch) : ''}
+        ${state.tab === 'inventory' ? renderInventory(data.inventoryItems, data.inventoryMovements, data.branch) : ''}
         ${state.tab === 'maintenance' ? renderMaintenance(data.machines, data.subcleanings, data.branch) : ''}
         ${state.tab === 'staff' ? renderStaff(data.allStaff, data.branch) : ''}
         ${state.tab === 'revolving' ? renderRevolving(data.sales, data.revolvingHistory, data.orders, data.expenses) : ''}
@@ -779,17 +789,7 @@ function renderDashboard(metrics: { paidToday: number; cashPaidToday: number; gc
     <section class="dashboard-main">
       <article class="panel revenue-panel">
         ${sectionTitle('Revenue overview', 'Paid amount for the last 7 days.')}
-        <button class="secondary dashboard-print-button" type="button" data-print-daily-summary>Print Daily Summary</button>
-        <div class="dashboard-summary-slip">
-          <h3>Laba101 Daily Summary</h3>
-          <p>${escapeHtml(localDateInput())}</p>
-          <div><span>Paid today:</span><strong>${money(metrics.paidToday)}</strong></div>
-          <div><span>Cash:</span><strong>${money(metrics.cashPaidToday)}</strong></div>
-          <div><span>GCash:</span><strong>${money(metrics.gcashPaidToday)}</strong></div>
-          <div><span>Disbursement:</span><strong>${money(metrics.disbursementToday)}</strong></div>
-          <div><span>Cash-on hand:</span><strong>${money(metrics.cashOnHandToday)}</strong></div>
-          <div class="signature-row"><span>Name of receiver and signature</span></div>
-        </div>
+        <button class="secondary dashboard-print-button" type="button" data-open-daily-summary>Print Daily Summary</button>
         <div class="stats compact dashboard-stats">
           <div class="stat paid-today-stat">
             <span class="card-label">Paid Today</span>
@@ -810,7 +810,31 @@ function renderDashboard(metrics: { paidToday: number; cashPaidToday: number; gc
         </div>
         <div class="chart-footnote">Values include POS payments and Daily Report sales input.</div>
       </article>
+      ${state.dashboardSummaryModalOpen ? renderDashboardSummaryModal(metrics) : ''}
     </section>
+  `;
+}
+
+function renderDashboardSummaryModal(metrics: { paidToday: number; cashPaidToday: number; gcashPaidToday: number; disbursementToday: number; cashOnHandToday: number }) {
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <div class="receipt-modal dashboard-summary-modal" role="dialog" aria-modal="true" aria-labelledby="daily-summary-title">
+        <div class="modal-actions">
+          <button class="primary" type="button" data-print-modal>Print</button>
+          <button class="secondary" type="button" data-close-daily-summary>Close</button>
+        </div>
+        <div class="receipt dashboard-summary-slip">
+          <h3 id="daily-summary-title">Laba101 Daily Summary</h3>
+          <p>${escapeHtml(localDateInput())}</p>
+          <div><span>Paid today:</span><strong>${money(metrics.paidToday)}</strong></div>
+          <div><span>Cash:</span><strong>${money(metrics.cashPaidToday)}</strong></div>
+          <div><span>GCash:</span><strong>${money(metrics.gcashPaidToday)}</strong></div>
+          <div><span>Disbursement:</span><strong>${money(metrics.disbursementToday)}</strong></div>
+          <div><span>Cash-on hand:</span><strong>${money(metrics.cashOnHandToday)}</strong></div>
+          <div class="signature-row"><span>Name of receiver and signature</span></div>
+        </div>
+      </div>
+    </div>
   `;
 }
 
@@ -895,10 +919,11 @@ function renderPos(orders: OrderRow[], customers: Customer[], services: LaundryS
 
 function renderOrders(orders: OrderRow[], staff: Staff[], services: LaundryService[], payments: Payment[]) {
   const receipt = state.receiptOrderId ? orders.find((order) => order.id === state.receiptOrderId) : null;
+  const activeOrders = orders.filter((order) => order.status !== 'claimed');
   const query = state.orderSearch.trim().toLowerCase();
   const dateFilter = state.orderDateFilter.trim();
   const paymentFilter = state.orderPaymentFilter.trim().toLowerCase();
-  const filteredOrders = orders.filter((order) => {
+  const filteredOrders = activeOrders.filter((order) => {
     const matchesQuery = !query || [order.ticket, order.customer, order.phone, order.service, order.itemCategory, order.status].some((value) => String(value ?? '').toLowerCase().includes(query));
     const matchesDate = !dateFilter || localDateFromIso(order.createdAt) === dateFilter;
     const matchesPayment = !paymentFilter || orderPaymentStatus(order) === paymentFilter;
@@ -1005,6 +1030,7 @@ function renderOrderRow(order: OrderRow, staff: Staff[], services: LaundryServic
   const nextStep = steps.find((step) => !order.workflowCompleted.includes(step.key));
   const needsFoldStaff = nextStep?.key === 'fold';
   const paymentStatus = orderPaymentStatus(order);
+  const paymentStatusLabel = paymentStatus === 'unpaid' ? 'pending' : paymentStatus;
   const extrasLabel = order.extras.length
     ? order.extras.map((extra) => `${escapeHtml(cleanAddonName(extra.name))} x${Number(extra.quantity ?? 1)}`).join(', ')
     : '';
@@ -1029,7 +1055,7 @@ function renderOrderRow(order: OrderRow, staff: Staff[], services: LaundryServic
       <td><strong>${escapeHtml(order.ticket)}</strong><div class="small">${escapeHtml(formatDate(order.createdAt))}</div></td>
       <td>${escapeHtml(order.customer)}<div class="small">${escapeHtml(order.phone ?? '')}</div></td>
       <td>${escapeHtml(order.service)}${extrasLabel ? `<div class="small">Extras: ${extrasLabel}</div>` : ''}</td>
-      <td class="amount-cell"><strong>${money(order.totalAmount)}</strong><div class="payment-status status-${paymentStatus}">${escapeHtml(paymentStatus)}${paymentStatus === 'paid' ? '' : ` &middot; Bal: ${money(order.balance)}`}</div></td>
+      <td class="amount-cell payment-cell status-${paymentStatus}"><strong>${money(order.totalAmount)}</strong><div class="payment-status">${escapeHtml(paymentStatusLabel)}${paymentStatus === 'paid' ? '' : ` &middot; Bal: ${money(order.balance)}`}</div></td>
       <td>
       <div class="row-actions">
         ${nextStep?.key === 'fold' ? `<form class="inline-form advance-form flex-wrap" data-order-id="${order.id}">
@@ -1615,7 +1641,7 @@ function renderLogs(logs: ActivityLog[]) {
   `;
 }
 
-function renderInventory(items: InventoryItem[], branch: string) {
+function renderInventory(items: InventoryItem[], movements: InventoryMovement[], branch: string) {
   return `
     <section class="grid content full">
       <article class="panel">
@@ -1639,6 +1665,31 @@ function renderInventory(items: InventoryItem[], branch: string) {
           <div class="table wide-table">
             <div class="table-head"><div>Item</div><div>Qty</div><div>Unit</div><div>Reorder</div><div>Status</div><div>Updated</div><div>Action</div></div>
             ${items.map((item) => `<div class="table-row"><div><strong>${escapeHtml(item.name)}</strong><div class="small">${escapeHtml(item.notes ?? '')}</div></div><div>${item.quantity}</div><div>${escapeHtml(item.unit)}</div><div>${item.reorderLevel}</div><div class="${item.quantity <= item.reorderLevel ? 'warn' : 'ok'}">${item.quantity <= item.reorderLevel ? 'Low stock' : 'OK'}</div><div>${formatDate(item.updatedAt)}</div><div><button class="secondary edit-inventory-btn" type="button" data-id="${item.id}">Edit</button></div></div>`).join('') || '<div class="helper">No inventory items yet.</div>'}
+          </div>
+        </div>
+      </article>
+      <article class="panel">
+        ${sectionTitle('Stock In / Stock Out', 'Adjust inventory quantities')}
+        <form id="inventory-movement-form" class="form">
+          <label>Item<select name="itemId" required>
+            <option value="">Select item</option>
+            ${items.map((item) => `<option value="${item.id}">${escapeHtml(item.name)} (${item.quantity} ${escapeHtml(item.unit)})</option>`).join('')}
+          </select></label>
+          <div class="segmented">
+            <label><input type="radio" name="movementType" value="in" checked /> Stock-in</label>
+            <label><input type="radio" name="movementType" value="out" /> Stock-out</label>
+          </div>
+          <label>Quantity<input name="quantity" type="number" step="0.01" min="0.01" required /></label>
+          <label>Notes<textarea name="notes" placeholder="Reason, supplier, or usage"></textarea></label>
+          <button class="primary" type="submit">Save movement</button>
+        </form>
+      </article>
+      <article class="panel span-2">
+        ${sectionTitle('Stock Movement History', 'Recent stock-in and stock-out records')}
+        <div class="table-scroll">
+          <div class="table wide-table">
+            <div class="table-head"><div>Date</div><div>Item</div><div>Type</div><div>Qty</div><div>Staff</div><div>Notes</div></div>
+            ${movements.map((row) => `<div class="table-row"><div>${formatDate(row.createdAt)}</div><div>${escapeHtml(row.itemName)}</div><div class="${row.movementType === 'in' ? 'ok' : 'warn'}">${row.movementType === 'in' ? 'Stock-in' : 'Stock-out'}</div><div>${row.quantity}</div><div>${escapeHtml(row.staffName)}</div><div>${escapeHtml(row.notes ?? '')}</div></div>`).join('') || '<div class="helper">No stock movements yet.</div>'}
           </div>
         </div>
       </article>
@@ -1905,7 +1956,15 @@ function bindNavigation() {
       void render();
     });
   });
-  document.querySelector<HTMLButtonElement>('[data-print-daily-summary]')?.addEventListener('click', () => {
+  document.querySelector<HTMLButtonElement>('[data-open-daily-summary]')?.addEventListener('click', () => {
+    state.dashboardSummaryModalOpen = true;
+    void render();
+  });
+  document.querySelector<HTMLButtonElement>('[data-close-daily-summary]')?.addEventListener('click', () => {
+    state.dashboardSummaryModalOpen = false;
+    void render();
+  });
+  document.querySelector<HTMLButtonElement>('[data-print-modal]')?.addEventListener('click', () => {
     window.print();
   });
   document.querySelectorAll<HTMLElement>('[data-report-tab]').forEach((button) => {
@@ -2205,6 +2264,7 @@ function bindOrderForms(data: Awaited<ReturnType<typeof loadData>>) {
         paymentReference: String(fd.get('paymentReference') ?? '') || null,
         notes: String(fd.get('notes') ?? '') || null,
       });
+      await recordUiLog('Create order', `${order.ticket} ${money(order.totalAmount)}`);
       state.receiptOrderId = order.id;
       await render();
     } catch (error) {
@@ -2449,8 +2509,16 @@ function bindDisbursementForms(expenses: DisbursementExpense[]) {
       description: String(fd.get('description') ?? ''),
       amount: Number(fd.get('amount') ?? 0),
     };
+    if (disbursementType === 'daily' && input.expenseDate !== today()) {
+      const password = prompt('Admin password is required for non-today disbursement dates.');
+      if (!password || !(await verifyAdminPassword(password))) {
+        alert('Admin password is incorrect. Disbursement was not saved.');
+        return;
+      }
+    }
     if (id) await updateExpense(id, input);
     else await createExpense(input);
+    await recordUiLog(id ? 'Update disbursement' : 'Create disbursement', `${input.expenseDate} ${input.name} ${money(input.amount)}`);
     await render();
   });
   document.querySelectorAll<HTMLButtonElement>('.edit-expense-btn').forEach((btn) => {
@@ -2835,7 +2903,13 @@ function bindMaintenanceForms() {
       if (btn) { btn.disabled = false; btn.textContent = 'Start Cleaning'; }
       return;
     }
-    await saveSubcleaning({ date: String(fd.get('date') ?? ''), machineIds, cleaningStatus: String(fd.get('cleaningStatus') ?? ''), notes: String(fd.get('notes') ?? ''), branch: String(fd.get('branch') ?? '') });
+    await saveSubcleaning({ date: String(fd.get('date') ?? ''), machineIds, cleaningStatus: String(fd.get('cleaningStatus') ?? ''), cleaningType: 'tube', notes: String(fd.get('notes') ?? ''), branch: String(fd.get('branch') ?? '') });
+    await recordUiLog('Start tube cleaning', `${machineIds.length} machine(s)`);
+    await render();
+  });
+  document.querySelector<HTMLButtonElement>('#confirm-general-cleaning')?.addEventListener('click', async () => {
+    await confirmGeneralCleaning((document.querySelector<HTMLInputElement>('input[name="branch"]')?.value || state.currentUser?.branch || 'Main Store'), state.currentUser?.name ?? 'Unknown');
+    await recordUiLog('Confirm general cleaning', today());
     await render();
   });
   // Complete cleaning buttons
@@ -2846,6 +2920,7 @@ function bindMaintenanceForms() {
       btn.disabled = true;
       btn.textContent = 'Completing...';
       await completeCleaning(machineId, branch);
+      await recordUiLog('Complete tube cleaning', `Machine ID ${machineId}`);
       await render();
     });
   });
@@ -2891,6 +2966,26 @@ function bindInventoryForms(items: InventoryItem[], branch: string) {
       (form.querySelector('[name=notes]') as HTMLTextAreaElement).value = item.notes ?? '';
       form.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
+  });
+
+  document.querySelector<HTMLFormElement>('#inventory-movement-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const fd = new FormData(event.currentTarget);
+    const movementType = String(fd.get('movementType') ?? 'in') === 'out' ? 'out' : 'in';
+    try {
+      await recordInventoryMovement({
+        itemId: Number(fd.get('itemId') ?? 0),
+        movementType,
+        quantity: Number(fd.get('quantity') ?? 0),
+        notes: String(fd.get('notes') ?? ''),
+        staffName: state.currentUser?.name ?? 'Unknown',
+        branch,
+      });
+      await recordUiLog(movementType === 'in' ? 'Stock-in' : 'Stock-out', `Item ID ${fd.get('itemId')} qty ${fd.get('quantity')}`);
+      await render();
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Stock movement failed.');
+    }
   });
 }
 
