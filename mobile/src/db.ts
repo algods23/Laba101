@@ -85,6 +85,7 @@ export type OrderRow = {
   foldedBy: number | null;
   foldedByName: string | null;
   foldedByStaffIds: number[];
+  foldedAt: string | null;
   releasedBy: number | null;
   releasedByName: string | null;
   dueAt: string;
@@ -568,6 +569,7 @@ async function ensureSchema() {
       notes TEXT,
       foldedBy INTEGER,
       foldedByStaffIds TEXT,
+      foldedAt TEXT,
       releasedBy INTEGER,
       dueAt TEXT,
       createdAt TEXT NOT NULL
@@ -615,6 +617,7 @@ async function ensureSchema() {
   await addColumnIfMissing(db, 'orders', 'extras', 'TEXT');
   await addColumnIfMissing(db, 'orders', 'notes', 'TEXT');
   await addColumnIfMissing(db, 'orders', 'foldedByStaffIds', 'TEXT');
+  await addColumnIfMissing(db, 'orders', 'foldedAt', 'TEXT');
   await addColumnIfMissing(db, 'orders', 'releasedBy', 'INTEGER');
   await addColumnIfMissing(db, 'orders', 'dueAt', 'TEXT');
   await addColumnIfMissing(db, 'orders', 'createdAt', 'TEXT NOT NULL DEFAULT ""');
@@ -650,8 +653,8 @@ async function ensureSchema() {
 
 async function insertNativeOrder(db: SQLiteDBConnection, order: OrderRow) {
   await db.run(
-    'INSERT INTO orders (id, ticket, customerId, customer, phone, serviceId, service, serviceLines, itemCategoryId, itemCategory, branch, status, workflowCompleted, weightKg, price, additionalCharge, extraServiceAmount, totalAmount, paidAmount, extras, notes, foldedBy, foldedByStaffIds, dueAt, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [order.id, order.ticket, order.customerId, order.customer, order.phone, order.serviceId, order.service, JSON.stringify(order.serviceLines ?? []), order.itemCategoryId, order.itemCategory, order.branch, order.status, JSON.stringify(order.workflowCompleted), order.weightKg, order.price, order.additionalCharge, order.extraServiceAmount, order.totalAmount, order.paidAmount, JSON.stringify(order.extras), order.notes, order.foldedBy, JSON.stringify(order.foldedByStaffIds ?? []), order.dueAt, order.createdAt],
+    'INSERT INTO orders (id, ticket, customerId, customer, phone, serviceId, service, serviceLines, itemCategoryId, itemCategory, branch, status, workflowCompleted, weightKg, price, additionalCharge, extraServiceAmount, totalAmount, paidAmount, extras, notes, foldedBy, foldedByStaffIds, foldedAt, dueAt, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [order.id, order.ticket, order.customerId, order.customer, order.phone, order.serviceId, order.service, JSON.stringify(order.serviceLines ?? []), order.itemCategoryId, order.itemCategory, order.branch, order.status, JSON.stringify(order.workflowCompleted), order.weightKg, order.price, order.additionalCharge, order.extraServiceAmount, order.totalAmount, order.paidAmount, JSON.stringify(order.extras), order.notes, order.foldedBy, JSON.stringify(order.foldedByStaffIds ?? []), order.foldedAt ?? null, order.dueAt, order.createdAt],
   );
 }
 
@@ -690,6 +693,7 @@ function hydrateOrder(row: Record<string, unknown>): OrderRow {
     foldedBy: Number.isFinite(foldedBy) && foldedBy > 0 ? foldedBy : null,
     foldedByName: row.foldedByName ? String(row.foldedByName) : null,
     foldedByStaffIds: parseJson<number[]>(row.foldedByStaffIds as string | null, []),
+    foldedAt: row.foldedAt ? String(row.foldedAt) : null,
     releasedBy: Number.isFinite(releasedBy) && releasedBy > 0 ? releasedBy : null,
     releasedByName: row.releasedByName ? String(row.releasedByName) : null,
     dueAt: String(row.dueAt),
@@ -973,6 +977,7 @@ export async function listOrders(branch: string): Promise<OrderRow[]> {
         ...order,
         serviceLines: order.serviceLines ?? [{ id: order.serviceId, name: order.service, price: Number(order.price), quantity: 1, total: Number(order.price) }],
         foldedByStaffIds: order.foldedByStaffIds ?? [],
+        foldedAt: order.foldedAt ?? null,
         releasedBy: order.releasedBy ?? null,
         releasedByName: order.releasedByName ?? null,
         balance: Number((order.totalAmount - order.paidAmount).toFixed(2)),
@@ -1031,6 +1036,7 @@ export async function createOrder(input: { customerId?: number; customerName: st
     foldedBy: null,
     foldedByName: null,
     foldedByStaffIds: [],
+    foldedAt: null,
     releasedBy: null,
     releasedByName: null,
     dueAt: new Date(Date.now() + Math.max(1, ...selectedServices.map((item) => item.turnaroundHours)) * 60 * 60 * 1000).toISOString(),
@@ -1075,6 +1081,7 @@ export async function advanceOrder(orderId: number, assignedStaffId?: number | n
   if (next === 'fold' && assignedStaffId) {
     const assignedIds = Array.isArray(assignedStaffId) ? assignedStaffId : [assignedStaffId];
     order.foldedBy = assignedIds[0] || null;
+    order.foldedAt = nowIso();
     // Append these staff IDs (one per load folded by that staff)
     const ids = Array.isArray(order.foldedByStaffIds) ? [...order.foldedByStaffIds] : [];
     ids.push(...assignedIds);
@@ -1093,8 +1100,8 @@ export async function advanceOrder(orderId: number, assignedStaffId?: number | n
   }
   const db = await ensureNativeDb();
   await db.run(
-    'UPDATE orders SET workflowCompleted = ?, status = ?, foldedBy = ?, foldedByStaffIds = ?, releasedBy = ? WHERE id = ?',
-    [JSON.stringify(order.workflowCompleted), order.status, order.foldedBy, JSON.stringify(order.foldedByStaffIds ?? []), order.releasedBy, order.id],
+    'UPDATE orders SET workflowCompleted = ?, status = ?, foldedBy = ?, foldedByStaffIds = ?, foldedAt = ?, releasedBy = ? WHERE id = ?',
+    [JSON.stringify(order.workflowCompleted), order.status, order.foldedBy, JSON.stringify(order.foldedByStaffIds ?? []), order.foldedAt ?? null, order.releasedBy, order.id],
   );
 }
 

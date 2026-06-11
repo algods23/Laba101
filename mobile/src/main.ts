@@ -233,6 +233,15 @@ function foldCountRowsFromOrders(orders: OrderRow[], staff: Staff[]) {
   return Array.from(grouped.values()).map((r) => ({ staffName: r.staffName, folds: r.folds }));
 }
 
+function foldDateForOrder(order: OrderRow) {
+  return order.foldedAt ? localDateFromIso(order.foldedAt) : localDateFromIso(order.createdAt);
+}
+
+function disbursementSequence(number: string) {
+  const match = number.match(/(\d+)$/);
+  return match ? Number(match[1]) : 0;
+}
+
 function localDateInput(date = new Date()) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -373,7 +382,8 @@ function buildReportData(orders: OrderRow[], payments: Payment[], sales: DailySa
   const salesOrders = orders.filter((order) => reportSelectionInRange(localDateFromIso(order.createdAt), selection));
   const manualSales = sales.filter((sale) => reportSelectionInRange(sale.saleDate, selection));
   const filteredExpenses = expenses.filter((expense) => reportSelectionInRange(expense.expenseDate, selection));
-  const filteredFoldCounts = foldCountRowsFromOrders(salesOrders, staff);
+  const foldOrders = orders.filter((order) => order.workflowCompleted.includes('fold') && reportSelectionInRange(foldDateForOrder(order), selection));
+  const filteredFoldCounts = foldCountRowsFromOrders(foldOrders, staff);
   const paymentsByOrder = new Map<number, { cash: number; gcash: number }>();
   payments
     .filter((payment) => reportSelectionInRange(localDateFromIso(payment.receivedAt), selection))
@@ -709,7 +719,7 @@ async function render() {
   bindOrderForms(data);
   bindPricingForms(data.allServices);
   bindDisbursementForms(data.expenses);
-  bindReportActions(data.orders, data.payments, data.sales, data.expenses, data.revolvingHistory, data.foldRate);
+  bindReportActions(data.orders, data.payments, data.sales, data.expenses, data.revolvingHistory, data.allStaff, data.foldRate);
   bindOrderFilters();
   bindCustomerSearch();
   bindMaintenanceForms();
@@ -1416,6 +1426,7 @@ function renderDisbursements(expenses: DisbursementExpense[], sales: DailySale[]
   const monthlyExpense = expenses.filter((item) => expenseType(item) === 'monthly' && item.expenseDate.startsWith(monthValue)).reduce((sum, item) => sum + item.amount, 0);
   const todaysManualSales = sales.filter((item) => item.saleDate === todayValue).reduce((sum, item) => sum + item.totalAmount, 0);
   const monthlyManualSales = sales.filter((item) => item.saleDate.startsWith(monthValue)).reduce((sum, item) => sum + item.totalAmount, 0);
+  const latestExpenses = [...expenses].sort((a, b) => disbursementSequence(b.number) - disbursementSequence(a.number) || b.id - a.id);
   return `
     <section class="page-head">
       <div>
@@ -1457,12 +1468,19 @@ function renderDisbursements(expenses: DisbursementExpense[], sales: DailySale[]
       </article>
       <article class="panel">
         ${sectionTitle('Disbursement list', 'Expenses only')}
-        <div class="table-scroll daily-report-scroll">
-          <div class="table daily-report-table">
-            <div class="table-head"><div>Date/Month</div><div>No.</div><div>Name</div><div>Category</div><div>Amount</div><div>Action</div></div>
-            ${expenses.map((item) => `<div class="table-row"><div>${escapeHtml(expenseDateLabel(item))}<div class="small">${escapeHtml(expenseType(item))}</div></div><div>${escapeHtml(item.number)}</div><div>${escapeHtml(item.name)}</div><div>${escapeHtml(item.category)}</div><div>${money(item.amount)}</div><div class="row-actions"><button class="secondary edit-expense-btn" data-id="${item.id}" type="button">Edit</button>${isAdmin ? `<button class="secondary delete-expense-btn" data-id="${item.id}" type="button">Delete</button>` : ''}</div></div>`).join('') || '<div class="helper">No expenses yet.</div>'}
-          </div>
-        </div>
+        ${renderHtmlTable(
+          ['Date/Month', 'No.', 'Type', 'Name', 'Category', 'Amount', 'Action'],
+          latestExpenses.map((item) => [
+            `<strong>${escapeHtml(expenseDateLabel(item))}</strong>`,
+            escapeHtml(item.number),
+            escapeHtml(expenseType(item)),
+            escapeHtml(item.name),
+            escapeHtml(item.category),
+            money(item.amount),
+            `<div class="row-actions"><button class="secondary edit-expense-btn" data-id="${item.id}" type="button">Edit</button>${isAdmin ? `<button class="secondary delete-expense-btn" data-id="${item.id}" type="button">Delete</button>` : ''}</div>`,
+          ]),
+          'data-table orders-data-table app-record-table disbursement-list-table',
+        )}
       </article>
     </section>
     ` : `
@@ -1630,12 +1648,16 @@ function renderLogs(logs: ActivityLog[]) {
     <section class="grid content full">
       <article class="panel span-2">
         ${sectionTitle('Activity Logs', 'Recorded staff actions and timestamps')}
-        <div class="table-scroll">
-          <div class="table wide-table">
-            <div class="table-head"><div>Timestamp</div><div>Staff</div><div>Action</div><div>Details</div></div>
-            ${logs.map((log) => `<div class="table-row"><div>${formatDate(log.timestamp)}</div><div>${escapeHtml(log.staffName)}</div><div><strong>${escapeHtml(log.action)}</strong></div><div>${escapeHtml(log.details)}</div></div>`).join('') || '<div class="helper">No logs yet.</div>'}
-          </div>
-        </div>
+        ${renderHtmlTable(
+          ['Timestamp', 'Staff', 'Action', 'Details'],
+          logs.map((log) => [
+            formatDateTimeStack(log.timestamp),
+            escapeHtml(log.staffName),
+            `<strong>${escapeHtml(log.action)}</strong>`,
+            escapeHtml(log.details),
+          ]),
+          'data-table orders-data-table app-record-table logs-table',
+        )}
       </article>
     </section>
   `;
@@ -1661,12 +1683,19 @@ function renderInventory(items: InventoryItem[], movements: InventoryMovement[],
       </article>
       <article class="panel span-2">
         ${sectionTitle('Stock List', 'Editable branch inventory')}
-        <div class="table-scroll">
-          <div class="table wide-table">
-            <div class="table-head"><div>Item</div><div>Qty</div><div>Unit</div><div>Reorder</div><div>Status</div><div>Updated</div><div>Action</div></div>
-            ${items.map((item) => `<div class="table-row"><div><strong>${escapeHtml(item.name)}</strong><div class="small">${escapeHtml(item.notes ?? '')}</div></div><div>${item.quantity}</div><div>${escapeHtml(item.unit)}</div><div>${item.reorderLevel}</div><div class="${item.quantity <= item.reorderLevel ? 'warn' : 'ok'}">${item.quantity <= item.reorderLevel ? 'Low stock' : 'OK'}</div><div>${formatDate(item.updatedAt)}</div><div><button class="secondary edit-inventory-btn" type="button" data-id="${item.id}">Edit</button></div></div>`).join('') || '<div class="helper">No inventory items yet.</div>'}
-          </div>
-        </div>
+        ${renderHtmlTable(
+          ['Item', 'Qty', 'Unit', 'Reorder', 'Status', 'Updated', 'Action'],
+          items.map((item) => [
+            `<strong>${escapeHtml(item.name)}</strong><div class="small">${escapeHtml(item.notes ?? '')}</div>`,
+            escapeHtml(item.quantity),
+            escapeHtml(item.unit),
+            escapeHtml(item.reorderLevel),
+            `<span class="${item.quantity <= item.reorderLevel ? 'warn' : 'ok'}">${item.quantity <= item.reorderLevel ? 'Low stock' : 'OK'}</span>`,
+            formatDateTimeStack(item.updatedAt),
+            `<button class="secondary edit-inventory-btn" type="button" data-id="${item.id}">Edit</button>`,
+          ]),
+          'data-table orders-data-table app-record-table inventory-stock-table',
+        )}
       </article>
       <article class="panel">
         ${sectionTitle('Stock In / Stock Out', 'Adjust inventory quantities')}
@@ -1686,12 +1715,18 @@ function renderInventory(items: InventoryItem[], movements: InventoryMovement[],
       </article>
       <article class="panel span-2">
         ${sectionTitle('Stock Movement History', 'Recent stock-in and stock-out records')}
-        <div class="table-scroll">
-          <div class="table wide-table">
-            <div class="table-head"><div>Date</div><div>Item</div><div>Type</div><div>Qty</div><div>Staff</div><div>Notes</div></div>
-            ${movements.map((row) => `<div class="table-row"><div>${formatDate(row.createdAt)}</div><div>${escapeHtml(row.itemName)}</div><div class="${row.movementType === 'in' ? 'ok' : 'warn'}">${row.movementType === 'in' ? 'Stock-in' : 'Stock-out'}</div><div>${row.quantity}</div><div>${escapeHtml(row.staffName)}</div><div>${escapeHtml(row.notes ?? '')}</div></div>`).join('') || '<div class="helper">No stock movements yet.</div>'}
-          </div>
-        </div>
+        ${renderHtmlTable(
+          ['Date', 'Item', 'Type', 'Qty', 'Staff', 'Notes'],
+          movements.map((row) => [
+            formatDateTimeStack(row.createdAt),
+            escapeHtml(row.itemName),
+            `<span class="${row.movementType === 'in' ? 'ok' : 'warn'}">${row.movementType === 'in' ? 'Stock-in' : 'Stock-out'}</span>`,
+            escapeHtml(row.quantity),
+            escapeHtml(row.staffName),
+            escapeHtml(row.notes ?? ''),
+          ]),
+          'data-table orders-data-table app-record-table inventory-movement-table',
+        )}
       </article>
     </section>
   `;
@@ -1700,13 +1735,23 @@ function renderInventory(items: InventoryItem[], movements: InventoryMovement[],
 function renderMaintenance(machines: Machine[], subcleanings: Subcleaning[], branch: string) {
   const availableMachines = machines.filter((machine) => machine.status !== 'under_cleaning');
   const cleaningMachines = machines.filter((machine) => machine.status === 'under_cleaning');
-  const calendarDays = Array.from({ length: 14 }, (_, index) => {
-    const date = new Date();
-    date.setDate(date.getDate() - index);
+  const calendarBase = new Date();
+  const calendarStart = new Date(calendarBase.getFullYear(), calendarBase.getMonth(), 1);
+  calendarStart.setDate(calendarStart.getDate() - calendarStart.getDay());
+  const calendarDays = Array.from({ length: 35 }, (_, index) => {
+    const date = new Date(calendarStart);
+    date.setDate(calendarStart.getDate() + index);
     const key = localDateInput(date);
     const records = subcleanings.filter((row) => row.date === key);
-    return { key, records };
+    return {
+      key,
+      date,
+      records,
+      isCurrentMonth: date.getMonth() === calendarBase.getMonth(),
+      isToday: key === today(),
+    };
   });
+  const calendarTitle = new Intl.DateTimeFormat('en-PH', { month: 'long', year: 'numeric' }).format(calendarBase);
   const generalDoneToday = subcleanings.some((row) => row.date === today() && row.cleaningType === 'general');
   return `
     <section class="page-head">
@@ -1755,18 +1800,36 @@ function renderMaintenance(machines: Machine[], subcleanings: Subcleaning[], bra
       </article>
       <article class="panel span-2">
         ${sectionTitle('Tube Cleaning Checklist', 'Track which machines have been cleaned today.')}
-        <div class="table">
-          <div class="table-head"><div>Machine</div><div>Type</div><div>Status</div><div>Notes</div><div>Date</div></div>
-          ${machines.map((machine) => {
+        ${renderHtmlTable(
+          ['Machine', 'Type', 'Status', 'Notes', 'Date'],
+          machines.map((machine) => {
             const record = subcleanings.find((row) => row.machineIds.includes(machine.id) && row.date === today());
-            return `<div class="table-row"><div><strong>${escapeHtml(machine.machineName)}</strong></div><div>${escapeHtml(machine.machineType)}</div><div>${record ? escapeHtml(record.cleaningStatus.replace('_', ' ')) : 'Not Cleaned'}</div><div>${escapeHtml(record?.notes ?? '-')}</div><div>${today()}</div></div>`;
-          }).join('')}
-        </div>
+            return [
+              `<strong>${escapeHtml(machine.machineName)}</strong>`,
+              escapeHtml(machine.machineType),
+              `<span class="${record ? 'ok' : 'warn'}">${record ? escapeHtml(record.cleaningStatus.replace('_', ' ')) : 'Not Cleaned'}</span>`,
+              escapeHtml(record?.notes ?? '-'),
+              today(),
+            ];
+          }),
+          'data-table orders-data-table app-record-table tube-checklist-table',
+        )}
       </article>
       <article class="panel span-2">
-        ${sectionTitle('Cleaning Calendar', 'Recent days with tube or general cleaning')}
+        ${sectionTitle('Cleaning Calendar', calendarTitle)}
         <div class="maintenance-calendar">
-          ${calendarDays.map((day) => `<div class="calendar-day ${day.records.length ? 'has-records' : ''}"><strong>${escapeHtml(day.key)}</strong><span>${day.records.some((row) => row.cleaningType === 'general') ? 'General cleaning' : ''}</span><small>${day.records.filter((row) => row.cleaningType !== 'general').length ? `${day.records.filter((row) => row.cleaningType !== 'general').length} tube record(s)` : 'No tube records'}</small></div>`).join('')}
+          <div class="calendar-weekdays">${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((label) => `<span>${label}</span>`).join('')}</div>
+          <div class="calendar-grid">
+            ${calendarDays.map((day) => {
+              const tubeCount = day.records.filter((row) => row.cleaningType !== 'general').length;
+              const hasGeneral = day.records.some((row) => row.cleaningType === 'general');
+              return `<div class="calendar-day ${day.records.length ? 'has-records' : ''} ${day.isCurrentMonth ? '' : 'is-muted'} ${day.isToday ? 'is-today' : ''}">
+                <strong>${day.date.getDate()}</strong>
+                <span>${hasGeneral ? 'General' : ''}</span>
+                <small>${tubeCount ? `${tubeCount} tube` : 'No tube'}</small>
+              </div>`;
+            }).join('')}
+          </div>
         </div>
       </article>
     </section>
@@ -2555,7 +2618,7 @@ function bindDisbursementForms(expenses: DisbursementExpense[]) {
   });
 }
 
-function bindReportActions(orders: OrderRow[], payments: Payment[], sales: DailySale[], expenses: DisbursementExpense[], revolvingHistory: RevolvingHistory[], foldRate: number) {
+function bindReportActions(orders: OrderRow[], payments: Payment[], sales: DailySale[], expenses: DisbursementExpense[], revolvingHistory: RevolvingHistory[], staff: Staff[], foldRate: number) {
   document.querySelector<HTMLButtonElement>('#generate-report')?.addEventListener('click', () => {
     state.reportPreview = currentReportSelection();
     void render();
@@ -2718,7 +2781,7 @@ function bindReportActions(orders: OrderRow[], payments: Payment[], sales: Daily
   };
   const reportFile = () => {
     const selection = currentReportSelection();
-    const report = buildReportData(orders, payments, sales, expenses, revolvingHistory, foldRate, selection);
+    const report = buildReportData(orders, payments, sales, expenses, revolvingHistory, staff, foldRate, selection);
     const sheets: Array<{ name: string; rows: Array<Array<string | number>> }> = [];
     if (report.selectedTypes.has('sales')) {
       const salesData = report.salesRows();
