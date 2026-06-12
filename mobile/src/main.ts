@@ -1031,10 +1031,10 @@ function renderArchivedOrders(orders: OrderRow[], staff: Staff[], services: Laun
         <div style="overflow-x: auto; width: 100%; -webkit-overflow-scrolling: touch;">
           <table class="data-table orders-data-table archived-orders-table">
             <thead>
-              <tr><th>Ticket</th><th>Customer</th><th>Service</th><th>Total Payment</th><th>Actions</th></tr>
+              <tr><th>Ticket</th><th>Customer</th><th>Service</th><th>Total Payment</th><th>Staff Actions</th><th>Actions</th></tr>
             </thead>
             <tbody>
-              ${filteredArchivedOrders.map((order) => renderOrderRow(order, staff, services)).join('') || '<tr><td colspan="5" class="table-empty">No archived orders found.</td></tr>'}
+              ${filteredArchivedOrders.map((order) => renderOrderRow(order, staff, services, true)).join('') || '<tr><td colspan="6" class="table-empty">No archived orders found.</td></tr>'}
             </tbody>
           </table>
         </div>
@@ -1044,7 +1044,7 @@ function renderArchivedOrders(orders: OrderRow[], staff: Staff[], services: Laun
   `;
 }
 
-function renderOrderRow(order: OrderRow, staff: Staff[], services: LaundryService[]) {
+function renderOrderRow(order: OrderRow, staff: Staff[], services: LaundryService[], isArchived = false) {
   const steps = workflowSteps(order, services);
   const claimedDone = order.workflowCompleted.includes('claimed');
   const nextStep = steps.find((step) => !order.workflowCompleted.includes(step.key));
@@ -1076,6 +1076,10 @@ function renderOrderRow(order: OrderRow, staff: Staff[], services: LaundryServic
       <td>${escapeHtml(order.customer)}<div class="small">${escapeHtml(order.phone ?? '')}</div></td>
       <td>${escapeHtml(order.service)}${extrasLabel ? `<div class="small">Extras: ${extrasLabel}</div>` : ''}</td>
       <td class="amount-cell payment-cell status-${paymentStatus}"><strong>${money(order.totalAmount)}</strong><div class="payment-status">${escapeHtml(paymentStatusLabel)}${paymentStatus === 'paid' ? '' : ` &middot; Bal: ${money(order.balance)}`}</div></td>
+      ${isArchived ? `<td>
+        <div class="small">Folded by: ${escapeHtml(order.foldedByName ?? 'N/A')}</div>
+        <div class="small">Released by: ${escapeHtml(order.releasedByName ?? 'N/A')}</div>
+      </td>` : ''}
       <td>
       <div class="row-actions">
         ${nextStep?.key === 'fold' ? `<form class="inline-form advance-form flex-wrap" data-order-id="${order.id}">
@@ -1576,37 +1580,61 @@ function renderReports(orders: OrderRow[], payments: Payment[], sales: DailySale
         ${preview.selectedTypes.has('sales') ? `
           <article>
             ${sectionTitle('Sales report preview', `${preview.selection.from} to ${preview.selection.to}`)}
-            <div class="table wide-table report-preview-table sales-table">
-              <div class="table-head report-table-head"><div>Ticket</div><div>Customer</div><div>Cash</div><div>GCash</div><div>Total Payment</div></div>
-              ${preview.salesRows().transactions.map((tx) => `<div class="table-row report-table-row"><div>${escapeHtml(tx.ticket)}</div><div>${escapeHtml(tx.customer)}</div><div>${money(tx.cash)}</div><div>${money(tx.gcash)}</div><div>${money(tx.total)}</div></div>`).join('')}
+            <div style="overflow-x: auto; width: 100%; -webkit-overflow-scrolling: touch;">
+              <table class="data-table orders-data-table bordered-table">
+                <thead>
+                  <tr><th>Ticket</th><th>Customer</th><th>Cash</th><th>GCash</th><th>Total Payment</th></tr>
+                </thead>
+                <tbody>
+                  ${preview.salesRows().transactions.map((tx) => `<tr><td>${escapeHtml(tx.ticket)}</td><td>${escapeHtml(tx.customer)}</td><td>${money(tx.cash)}</td><td>${money(tx.gcash)}</td><td><strong>${money(tx.total)}</strong></td></tr>`).join('') || '<tr><td colspan="5" class="table-empty">No sales records found.</td></tr>'}
+                </tbody>
+              </table>
             </div>
-            <div class="sales-summary-section">
+            <div class="sales-summary-section" style="margin-top: 16px;">
               <h3>Sales Summary</h3>
-              <div class="table sales-summary-table">
-                <div class="table-head"><div>Sales Type</div><div>Cash</div><div>GCash</div><div>Sales</div></div>
-                <div class="table-row"><div>Orders</div><div>${money(preview.salesRows().orderCashTotal)}</div><div>${money(preview.salesRows().orderGcashTotal)}</div><div>${money(preview.salesRows().orderCashTotal + preview.salesRows().orderGcashTotal)}</div></div>
-                <div class="table-row"><div>Whole Sale Day</div><div>${money(preview.salesRows().manualCashTotal)}</div><div>${money(preview.salesRows().manualGcashTotal)}</div><div>${money(preview.salesRows().manualCashTotal + preview.salesRows().manualGcashTotal)}</div></div>
-                <div class="table-row total-row"><div>Total</div><div>${money(preview.salesRows().totalCash)}</div><div>${money(preview.salesRows().totalGcash)}</div><div>${money(preview.salesRows().totalSales)}</div></div>
+              <div style="overflow-x: auto; width: 100%; -webkit-overflow-scrolling: touch; margin-top: 16px;">
+                <table class="data-table orders-data-table bordered-table">
+                  <thead>
+                    <tr><th>Sales Type</th><th>Cash</th><th>GCash</th><th>Sales</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr><td>Orders</td><td>${money(preview.salesRows().orderCashTotal)}</td><td>${money(preview.salesRows().orderGcashTotal)}</td><td>${money(preview.salesRows().orderCashTotal + preview.salesRows().orderGcashTotal)}</td></tr>
+                    <tr><td>Whole Sale Day</td><td>${money(preview.salesRows().manualCashTotal)}</td><td>${money(preview.salesRows().manualGcashTotal)}</td><td>${money(preview.salesRows().manualCashTotal + preview.salesRows().manualGcashTotal)}</td></tr>
+                    <tr style="font-weight: bold; background: #f8fafc;"><td>Total</td><td>${money(preview.salesRows().totalCash)}</td><td>${money(preview.salesRows().totalGcash)}</td><td>${money(preview.salesRows().totalSales)}</td></tr>
+                  </tbody>
+                </table>
               </div>
             </div>
           </article>` : ''}
         ${preview.selectedTypes.has('disbursement') ? `
           <article>
             ${sectionTitle('Disbursement preview', `${preview.selection.from} to ${preview.selection.to}`)}
-            <div class="table wide-table report-preview-table report-disbursement-table">
-              <div class="table-head report-table-head"><div>ID#</div><div>Date/Month</div><div>Type</div><div>Name</div><div>Category</div><div>Amount</div></div>
-              ${preview.disbursementRows().rows.slice(1).filter((row) => row.length && row[0] !== 'Total Disbursement').map((row) => `<div class="table-row report-table-row"><div>${escapeHtml(row[1] ?? '')}</div><div>${escapeHtml(row[0] ?? '')}</div><div>${escapeHtml(row[2] ?? '')}</div><div>${escapeHtml(row[3] ?? '')}</div><div>${escapeHtml(row[4] ?? '')}</div><div>${money(row[6] as number)}</div></div>`).join('')}
+            <div style="overflow-x: auto; width: 100%; -webkit-overflow-scrolling: touch;">
+              <table class="data-table orders-data-table bordered-table">
+                <thead>
+                  <tr><th>ID#</th><th>Date/Month</th><th>Type</th><th>Name</th><th>Category</th><th>Amount</th></tr>
+                </thead>
+                <tbody>
+                  ${preview.disbursementRows().rows.slice(1).filter((row) => row.length && row[0] !== 'Total Disbursement').map((row) => `<tr><td>${escapeHtml(String(row[1] ?? ''))}</td><td>${escapeHtml(String(row[0] ?? ''))}</td><td>${escapeHtml(String(row[2] ?? ''))}</td><td>${escapeHtml(String(row[3] ?? ''))}</td><td>${escapeHtml(String(row[4] ?? ''))}</td><td><strong>${money(row[6] as number)}</strong></td></tr>`).join('') || '<tr><td colspan="6" class="table-empty">No disbursements found.</td></tr>'}
+                </tbody>
+              </table>
             </div>
-            <div class="disbursement-total">
+            <div class="disbursement-total" style="margin-top: 16px;">
               <strong>Total Disbursement: ${money(preview.disbursementRows().totalDisbursement)}</strong>
             </div>
           </article>` : ''}
         ${preview.selectedTypes.has('fold_count') ? `
           <article>
             ${sectionTitle('Fold Count preview', `${preview.selection.from} to ${preview.selection.to}`)}
-            <div class="table report-preview-table">
-              <div class="table-head"><div>Staff</div><div>Fold Count</div></div>
-              ${preview.foldCountRows().rows.slice(1).map((row) => `<div class="table-row">${row.map((value) => `<div>${escapeHtml(value ?? '')}</div>`).join('')}</div>`).join('')}
+            <div style="overflow-x: auto; width: 100%; -webkit-overflow-scrolling: touch;">
+              <table class="data-table orders-data-table bordered-table">
+                <thead>
+                  <tr><th>Staff</th><th>Fold Count</th></tr>
+                </thead>
+                <tbody>
+                  ${preview.foldCountRows().rows.slice(1).map((row) => `<tr>${row.map((value) => `<td>${escapeHtml(String(value ?? ''))}</td>`).join('')}</tr>`).join('') || '<tr><td colspan="2" class="table-empty">No fold records found.</td></tr>'}
+                </tbody>
+              </table>
             </div>
           </article>` : ''}
         ${preview.selectedTypes.has('revolving_fund') ? `
@@ -1620,7 +1648,7 @@ function renderReports(orders: OrderRow[], payments: Payment[], sales: DailySale
                 escapeHtml(String(row[2] ?? '')),
                 escapeHtml(String(row[3] ?? '')),
               ]),
-              'data-table revolving-report-table',
+              'data-table orders-data-table bordered-table',
             )}
           </article>
           <article>
@@ -1636,7 +1664,7 @@ function renderReports(orders: OrderRow[], payments: Payment[], sales: DailySale
                 escapeHtml(String(row[5] ?? '')),
                 escapeHtml(String(row[6] ?? '')),
               ]),
-              'data-table revolving-report-table',
+              'data-table orders-data-table bordered-table',
             )}
           </article>` : ''}
         ${preview.selectedTypes.has('summary') ? `
@@ -2364,7 +2392,9 @@ function bindOrderForms(data: Awaited<ReturnType<typeof loadData>>) {
       const releasedBy = Number(fd.get('releasedBy') || 0);
       const assigned = staffIds.length > 0 ? staffIds : releasedBy > 0 ? releasedBy : null;
       await advanceOrder(orderId, assigned);
-      await recordUiLog(isClaim ? 'Claim order' : 'Advance order', `Order ID ${orderId}`);
+      const releasedByName = isClaim && releasedBy > 0 ? data.staff.find((s) => s.id === releasedBy)?.name : null;
+      const logDetails = isClaim && releasedByName ? `Order ID ${orderId} (Released by: ${releasedByName})` : `Order ID ${orderId}`;
+      await recordUiLog(isClaim ? 'Claim order' : 'Advance order', logDetails);
       await render();
     });
   });
