@@ -1560,8 +1560,8 @@ function renderReports(orders: OrderRow[], payments: Payment[], sales: DailySale
           <div class="report-checks">
             <label><input type="checkbox" name="reportType" value="sales" checked /> Sales Report</label>
             <label><input type="checkbox" name="reportType" value="disbursement" checked /> Disbursement Reports</label>
-            <label><input type="checkbox" name="reportType" value="fold_count" /> Fold Count</label>
-            <label><input type="checkbox" name="reportType" value="revolving_fund" /> Revolving Fund</label>
+            ${state.currentUser?.branch?.toLowerCase().includes('gensan') ? '' : `<label><input type="checkbox" name="reportType" value="fold_count" /> Fold Count</label>`}
+            ${state.currentUser?.branch?.toLowerCase().includes('mintal') ? '' : `<label><input type="checkbox" name="reportType" value="revolving_fund" /> Revolving Fund</label>`}
             <label><input type="checkbox" name="reportType" value="summary" checked /> Summary</label>
           </div>
         </div>
@@ -3275,7 +3275,7 @@ function renderRevolving(sales: DailySale[], revolvingHistory: RevolvingHistory[
         ${renderHtmlTable(
           ['Date of Sales', 'Cash on Hand', 'Status', 'Date Update', 'Action'],
           dailySummaryTableRows,
-          'data-table revolving-summary-datatable',
+          'data-table orders-data-table bordered-table',
         )}
       </article>
 
@@ -3294,7 +3294,7 @@ function renderRevolving(sales: DailySale[], revolvingHistory: RevolvingHistory[
         ${renderHtmlTable(
           ['Date', 'Disbursement #', 'Name', 'Amount', 'Category', 'Description', 'Type'],
           historyTableRows,
-          'data-table revolving-history-datatable',
+          'data-table orders-data-table bordered-table',
         )}
       </article>
 
