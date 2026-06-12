@@ -379,46 +379,56 @@ function reportSelectionInRange(date: string, selection: { from: string; to: str
 
 function buildReportData(orders: OrderRow[], payments: Payment[], sales: DailySale[], expenses: DisbursementExpense[], revolvingHistory: RevolvingHistory[], staff: Staff[], foldRate: number, selection: { from: string; to: string; types: ReportType[] }) {
   const selectedTypes = new Set(selection.types);
-  const salesOrders = orders.filter((order) => reportSelectionInRange(localDateFromIso(order.createdAt), selection));
   const manualSales = sales.filter((sale) => reportSelectionInRange(sale.saleDate, selection));
   const filteredExpenses = expenses.filter((expense) => reportSelectionInRange(expense.expenseDate, selection));
   const foldOrders = orders.filter((order) => order.workflowCompleted.includes('fold') && reportSelectionInRange(foldDateForOrder(order), selection));
   const filteredFoldCounts = foldCountRowsFromOrders(foldOrders, staff);
+
+  const paymentsInRange = payments.filter((payment) => reportSelectionInRange(localDateFromIso(payment.receivedAt), selection));
+  const orderIdsWithPaymentInRange = new Set(paymentsInRange.map(p => p.orderId));
+  const allOrderIdsWithAnyPayment = new Set(payments.map(p => p.orderId));
+
+  const salesOrders = orders.filter((order) => 
+    reportSelectionInRange(localDateFromIso(order.createdAt), selection) || orderIdsWithPaymentInRange.has(order.id)
+  );
+
   const paymentsByOrder = new Map<number, { cash: number; gcash: number }>();
-  payments
-    .filter((payment) => reportSelectionInRange(localDateFromIso(payment.receivedAt), selection))
-    .forEach((payment) => {
+  paymentsInRange.forEach((payment) => {
       const current = paymentsByOrder.get(payment.orderId) ?? { cash: 0, gcash: 0 };
       if (payment.method === 'gcash') current.gcash += payment.amount;
       else current.cash += payment.amount;
       paymentsByOrder.set(payment.orderId, current);
   });
 
-  const orderCashTotal = salesOrders.reduce((sum, order) => {
-    const payment = paymentsByOrder.get(order.id);
-    if (payment) {
-      const totalPayment = payment.cash + payment.gcash;
-      if (totalPayment > order.totalAmount) {
-        const ratio = order.totalAmount / totalPayment;
-        return sum + (payment.cash * ratio);
-      }
-      return sum + payment.cash;
+  const getOrderPaymentInRange = (order: OrderRow) => {
+    if (allOrderIdsWithAnyPayment.has(order.id)) {
+      return paymentsByOrder.get(order.id) ?? { cash: 0, gcash: 0 };
     }
-    return sum + order.paidAmount;
+    if (reportSelectionInRange(localDateFromIso(order.createdAt), selection)) {
+      return { cash: order.paidAmount, gcash: 0 };
+    }
+    return { cash: 0, gcash: 0 };
+  };
+
+  const orderCashTotal = salesOrders.reduce((sum, order) => {
+    const payment = getOrderPaymentInRange(order);
+    const totalPayment = payment.cash + payment.gcash;
+    if (totalPayment > order.totalAmount && order.totalAmount > 0 && allOrderIdsWithAnyPayment.has(order.id)) {
+      const ratio = order.totalAmount / totalPayment;
+      return sum + (payment.cash * ratio);
+    }
+    return sum + payment.cash;
   }, 0);
   const manualCashTotal = manualSales.reduce((sum, sale) => sum + sale.cashAmount, 0);
   const manualGcashTotal = manualSales.reduce((sum, sale) => sum + sale.gcashAmount, 0);
   const orderGcashTotal = salesOrders.reduce((sum, order) => {
-    const payment = paymentsByOrder.get(order.id);
-    if (payment) {
-      const totalPayment = payment.cash + payment.gcash;
-      if (totalPayment > order.totalAmount) {
-        const ratio = order.totalAmount / totalPayment;
-        return sum + (payment.gcash * ratio);
-      }
-      return sum + payment.gcash;
+    const payment = getOrderPaymentInRange(order);
+    const totalPayment = payment.cash + payment.gcash;
+    if (totalPayment > order.totalAmount && order.totalAmount > 0 && allOrderIdsWithAnyPayment.has(order.id)) {
+      const ratio = order.totalAmount / totalPayment;
+      return sum + (payment.gcash * ratio);
     }
-    return sum + 0;
+    return sum + payment.gcash;
   }, 0);
   const totalCash = orderCashTotal + manualCashTotal;
   const totalGcash = orderGcashTotal + manualGcashTotal;
@@ -436,12 +446,12 @@ function buildReportData(orders: OrderRow[], payments: Payment[], sales: DailySa
     totalGcash,
     totalSales,
     transactions: salesOrders.map((order) => {
-      const payment = paymentsByOrder.get(order.id) ?? { cash: order.paidAmount, gcash: 0 };
+      const payment = getOrderPaymentInRange(order);
       const totalPayment = payment.cash + payment.gcash;
       let cash = payment.cash;
       let gcash = payment.gcash;
       let total = totalPayment;
-      if (totalPayment > order.totalAmount) {
+      if (totalPayment > order.totalAmount && order.totalAmount > 0 && allOrderIdsWithAnyPayment.has(order.id)) {
         const ratio = order.totalAmount / totalPayment;
         cash = payment.cash * ratio;
         gcash = payment.gcash * ratio;
