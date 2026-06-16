@@ -840,10 +840,12 @@ function renderDashboardSummaryModal(metrics: { paidToday: number; cashPaidToday
     <div class="modal-backdrop" role="presentation">
       <div class="receipt-modal dashboard-summary-modal" role="dialog" aria-modal="true" aria-labelledby="daily-summary-title">
         <div class="modal-actions">
-          <button class="primary" type="button" data-print-modal>Print</button>
+          <button class="secondary" type="button" data-open-printer-panel>Printer</button>
+          <button class="primary" type="button" data-print-dashboard>${state.printerLoading ? 'Printing...' : 'Print'}</button>
           <button class="secondary" type="button" data-close-daily-summary>Close</button>
         </div>
-        <div class="receipt dashboard-summary-slip">
+        ${state.printerPanelOpen ? renderPrinterPanel() : ''}
+        <div class="receipt dashboard-summary-slip" id="dashboard-summary-print-area">
           <h3 id="daily-summary-title">Laba101 Daily Summary</h3>
           <p>${escapeHtml(localDateInput())}</p>
           <div><span>Paid today:</span><strong>${money(metrics.paidToday)}</strong></div>
@@ -1297,6 +1299,48 @@ async function thermalPrintCurrentReceipt(order: OrderRow, payments: Payment[]) 
       staffName: state.currentUser?.name?.trim() || 'Staff',
     });
     state.printerStatus = 'Receipt sent to printer.';
+  } catch (error) {
+    state.printerPanelOpen = true;
+    state.printerError = error instanceof Error ? error.message : 'Bluetooth thermal print failed.';
+  } finally {
+    state.printerLoading = false;
+    await render();
+  }
+}
+
+async function thermalPrintDashboardSummary() {
+  const metrics = await getDashboardMetrics();
+  state.printerLoading = true;
+  state.printerError = '';
+  state.printerStatus = '';
+  await render();
+  try {
+    if (!state.selectedPrinterAddress) {
+      const saved = await BluetoothThermalPrinter.getSavedPrinter();
+      state.selectedPrinterAddress = saved.address || '';
+    }
+    await BluetoothThermalPrinter.printReceipt({
+      address: state.selectedPrinterAddress || undefined,
+      paperWidth: state.printerPaperWidth,
+      storeName: 'Laba101',
+      receiptNumber: 'DAILY-SUMMARY',
+      dateTime: localDateInput(),
+      customerName: 'Daily Summary',
+      customerPhone: '',
+      items: [
+        { name: 'Paid today', quantity: 1, price: metrics.paidToday },
+        { name: 'Cash', quantity: 1, price: metrics.cashPaidToday },
+        { name: 'GCash', quantity: 1, price: metrics.gcashPaidToday },
+        { name: 'Disbursement', quantity: 1, price: metrics.disbursementToday },
+        { name: 'Cash on hand', quantity: 1, price: metrics.cashOnHandToday },
+      ],
+      totalAmount: metrics.paidToday,
+      paidAmount: metrics.paidToday,
+      changeAmount: 0,
+      balanceAmount: 0,
+      staffName: state.currentUser?.name?.trim() || 'Staff',
+    });
+    state.printerStatus = 'Daily summary sent to printer.';
   } catch (error) {
     state.printerPanelOpen = true;
     state.printerError = error instanceof Error ? error.message : 'Bluetooth thermal print failed.';
@@ -2065,8 +2109,8 @@ function bindNavigation() {
     state.dashboardSummaryModalOpen = false;
     void render();
   });
-  document.querySelector<HTMLButtonElement>('[data-print-modal]')?.addEventListener('click', () => {
-    window.print();
+  document.querySelector<HTMLButtonElement>('[data-print-dashboard]')?.addEventListener('click', () => {
+    void thermalPrintDashboardSummary();
   });
   document.querySelectorAll<HTMLElement>('[data-report-tab]').forEach((button) => {
     button.addEventListener('click', () => {

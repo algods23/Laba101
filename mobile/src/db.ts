@@ -218,12 +218,16 @@ let nativeDb: SQLiteDBConnection | null = null;
 /** Default logins bundled on a fresh APK install (offline SQLite). */
 export const defaultLoginAccounts = [
   { role: 'Admin', branch: 'Main Store', email: 'admin@laba101.test', password: 'password' },
+  { role: 'Admin (Mintal)', branch: 'Mintal Branch', email: 'admin@laba101.mintal', password: 'password' },
+  { role: 'Admin (Gensan)', branch: 'Gensan Branch', email: 'admin@laba101.gensan', password: 'password' },
   { role: 'Staff (Gensan)', branch: 'Gensan Branch', email: 'staff@laba101.gensan', password: 'password' },
 ] as const;
 
 const seedStaff: Staff[] = [
   { id: 1, name: 'Laba101 Admin', email: 'admin@laba101.test', password: 'password', role: 'admin', branch: 'Main Store' },
-  { id: 2, name: 'Gensan Branch Staff', email: 'staff@laba101.gensan', password: 'password', role: 'staff', branch: 'Gensan Branch' },
+  { id: 2, name: 'Mintal Branch Admin', email: 'admin@laba101.mintal', password: 'password', role: 'admin', branch: 'Mintal Branch' },
+  { id: 3, name: 'Gensan Branch Admin', email: 'admin@laba101.gensan', password: 'password', role: 'admin', branch: 'Gensan Branch' },
+  { id: 4, name: 'Gensan Branch Staff', email: 'staff@laba101.gensan', password: 'password', role: 'staff', branch: 'Gensan Branch' },
 ];
 
 const seedCustomers: Customer[] = [];

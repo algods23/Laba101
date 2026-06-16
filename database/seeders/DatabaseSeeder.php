@@ -30,6 +30,24 @@ class DatabaseSeeder extends Seeder
         );
 
         User::query()->updateOrCreate(
+            ['email' => 'admin@laba101.mintal'],
+            [
+                'name' => 'Mintal Branch Admin',
+                'password' => Hash::make('password'),
+                'role' => 'admin',
+            ]
+        );
+
+        User::query()->updateOrCreate(
+            ['email' => 'admin@laba101.gensan'],
+            [
+                'name' => 'Gensan Branch Admin',
+                'password' => Hash::make('password'),
+                'role' => 'admin',
+            ]
+        );
+
+        User::query()->updateOrCreate(
             ['email' => 'staff@laba101.test'],
             [
                 'name' => 'Laba101 Staff',
