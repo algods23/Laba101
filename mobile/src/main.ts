@@ -103,6 +103,18 @@ type BluetoothThermalPrinterPlugin = {
     balanceAmount: number;
     staffName: string;
   }): Promise<{ printed: boolean; address: string }>;
+  printDailySummary(options: {
+    address?: string;
+    paperWidth: 58 | 80;
+    storeName: string;
+    dateTime: string;
+    staffName: string;
+    paidToday: number;
+    cashPaidToday: number;
+    gcashPaidToday: number;
+    disbursementToday: number;
+    cashOnHandToday: number;
+  }): Promise<{ printed: boolean; address: string }>;
 };
 
 const BluetoothThermalPrinter = registerPlugin<BluetoothThermalPrinterPlugin>('BluetoothThermalPrinter');
@@ -1318,26 +1330,17 @@ async function thermalPrintDashboardSummary(metrics: { paidToday: number; cashPa
       const saved = await BluetoothThermalPrinter.getSavedPrinter();
       state.selectedPrinterAddress = saved.address || '';
     }
-    await BluetoothThermalPrinter.printReceipt({
+    await BluetoothThermalPrinter.printDailySummary({
       address: state.selectedPrinterAddress || undefined,
       paperWidth: state.printerPaperWidth,
       storeName: 'Laba101',
-      receiptNumber: 'DAILY-SUMMARY',
       dateTime: localDateInput(),
-      customerName: 'Daily Summary',
-      customerPhone: '',
-      items: [
-        { name: 'Paid today', quantity: 1, price: metrics.paidToday },
-        { name: 'Cash', quantity: 1, price: metrics.cashPaidToday },
-        { name: 'GCash', quantity: 1, price: metrics.gcashPaidToday },
-        { name: 'Disbursement', quantity: 1, price: metrics.disbursementToday },
-        { name: 'Cash on hand', quantity: 1, price: metrics.cashOnHandToday },
-      ],
-      totalAmount: metrics.paidToday,
-      paidAmount: metrics.paidToday,
-      changeAmount: 0,
-      balanceAmount: 0,
       staffName: state.currentUser?.name?.trim() || 'Staff',
+      paidToday: metrics.paidToday,
+      cashPaidToday: metrics.cashPaidToday,
+      gcashPaidToday: metrics.gcashPaidToday,
+      disbursementToday: metrics.disbursementToday,
+      cashOnHandToday: metrics.cashOnHandToday,
     });
     state.printerStatus = 'Daily summary sent to printer.';
   } catch (error) {

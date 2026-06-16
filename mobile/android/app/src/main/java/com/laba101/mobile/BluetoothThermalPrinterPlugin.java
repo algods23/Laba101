@@ -172,6 +172,33 @@ public class BluetoothThermalPrinterPlugin extends Plugin {
         }
     }
 
+    @PluginMethod
+    public void printDailySummary(PluginCall call) {
+        if (!ensureReady(call)) return;
+        String address = call.getString("address", getSavedAddress());
+        if (address == null || address.isEmpty()) {
+            call.reject("Select a paired printer first.");
+            return;
+        }
+
+        try {
+            if (!isConnected() || !address.equals(connectedAddress)) {
+                connectToAddress(address);
+            }
+            byte[] payload = buildDailySummaryBytes(call);
+            OutputStream output = socket.getOutputStream();
+            output.write(payload);
+            output.flush();
+            JSObject ret = new JSObject();
+            ret.put("printed", true);
+            ret.put("address", address);
+            call.resolve(ret);
+        } catch (Exception ex) {
+            closeSocket();
+            call.reject("Printer disconnected or unavailable: " + ex.getMessage());
+        }
+    }
+
     private boolean ensureReady(PluginCall call) {
         if (adapter == null) {
             call.reject("Bluetooth is not available on this device.");
@@ -288,6 +315,52 @@ public class BluetoothThermalPrinterPlugin extends Plugin {
         writeLine(out, "");
         writeLine(out, "");
          writeLine(out, "");
+        writeLine(out, "");
+        out.write(new byte[] { 0x1D, 0x56, 0x00 });
+        return out.toByteArray();
+    }
+
+    private byte[] buildDailySummaryBytes(PluginCall call) throws Exception {
+        int paperWidth = call.getInt("paperWidth", 58);
+        int lineWidth = paperWidth >= 80 ? 42 : 32;
+        String storeName = call.getString("storeName", "Laba101");
+        String dateTime = call.getString("dateTime", new SimpleDateFormat("MMM dd, yyyy h:mm a", Locale.US).format(new Date()));
+        String staffName = call.getString("staffName", "");
+        double paidToday = call.getDouble("paidToday", 0.0);
+        double cashPaidToday = call.getDouble("cashPaidToday", 0.0);
+        double gcashPaidToday = call.getDouble("gcashPaidToday", 0.0);
+        double disbursementToday = call.getDouble("disbursementToday", 0.0);
+        double cashOnHandToday = call.getDouble("cashOnHandToday", 0.0);
+
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        out.write(new byte[] { 0x1B, 0x40 });
+        out.write(new byte[] { 0x1B, 0x61, 0x01 });
+        out.write(new byte[] { 0x1B, 0x45, 0x01 });
+        writeLine(out, storeName.toUpperCase(Locale.US));
+        out.write(new byte[] { 0x1B, 0x45, 0x00 });
+        writeLine(out, "DAILY SUMMARY");
+        writeLine(out, dateTime);
+        out.write(new byte[] { 0x1B, 0x61, 0x00 });
+        writeLine(out, repeat('-', lineWidth));
+        writeLine(out, "");
+        out.write(new byte[] { 0x1B, 0x45, 0x01 });
+        writeLine(out, fitColumns("PAID TODAY:", "", currency(paidToday), lineWidth));
+        writeLine(out, fitColumns("CASH:", "", currency(cashPaidToday), lineWidth));
+        writeLine(out, fitColumns("GCASH:", "", currency(gcashPaidToday), lineWidth));
+        writeLine(out, fitColumns("DISBURSEMENT:", "", currency(disbursementToday), lineWidth));
+        writeLine(out, fitColumns("CASH ON HAND:", "", currency(cashOnHandToday), lineWidth));
+        out.write(new byte[] { 0x1B, 0x45, 0x00 });
+        writeLine(out, "");
+        writeLine(out, repeat('-', lineWidth));
+        out.write(new byte[] { 0x1B, 0x61, 0x01 });
+        
+        writeLine(out, "");
+        if (staffName != null && !staffName.isEmpty()) {
+            writeLine(out, "Staff: " + staffName);
+        }
+        writeLine(out, "");
+        writeLine(out, "");
+        writeLine(out, "");
         writeLine(out, "");
         out.write(new byte[] { 0x1D, 0x56, 0x00 });
         return out.toByteArray();
