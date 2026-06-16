@@ -841,7 +841,7 @@ function renderDashboardSummaryModal(metrics: { paidToday: number; cashPaidToday
       <div class="receipt-modal dashboard-summary-modal" role="dialog" aria-modal="true" aria-labelledby="daily-summary-title">
         <div class="modal-actions">
           <button class="secondary" type="button" data-open-printer-panel>Printer</button>
-          <button class="primary" type="button" data-print-dashboard>${state.printerLoading ? 'Printing...' : 'Print'}</button>
+          <button class="primary" type="button" data-print-dashboard data-metrics='${JSON.stringify(metrics)}'>${state.printerLoading ? 'Printing...' : 'Print'}</button>
           <button class="secondary" type="button" data-close-daily-summary>Close</button>
         </div>
         ${state.printerPanelOpen ? renderPrinterPanel() : ''}
@@ -1308,8 +1308,7 @@ async function thermalPrintCurrentReceipt(order: OrderRow, payments: Payment[]) 
   }
 }
 
-async function thermalPrintDashboardSummary() {
-  const metrics = await getDashboardMetrics();
+async function thermalPrintDashboardSummary(metrics: { paidToday: number; cashPaidToday: number; gcashPaidToday: number; disbursementToday: number; cashOnHandToday: number }) {
   state.printerLoading = true;
   state.printerError = '';
   state.printerStatus = '';
@@ -2109,8 +2108,17 @@ function bindNavigation() {
     state.dashboardSummaryModalOpen = false;
     void render();
   });
-  document.querySelector<HTMLButtonElement>('[data-print-dashboard]')?.addEventListener('click', () => {
-    void thermalPrintDashboardSummary();
+  document.querySelector<HTMLButtonElement>('[data-print-dashboard]')?.addEventListener('click', (event) => {
+    const button = event.currentTarget as HTMLButtonElement;
+    const metricsJson = button.dataset.metrics;
+    if (metricsJson) {
+      try {
+        const metrics = JSON.parse(metricsJson);
+        void thermalPrintDashboardSummary(metrics);
+      } catch (error) {
+        console.error('Failed to parse dashboard metrics:', error);
+      }
+    }
   });
   document.querySelectorAll<HTMLElement>('[data-report-tab]').forEach((button) => {
     button.addEventListener('click', () => {
