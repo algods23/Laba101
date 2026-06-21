@@ -33,6 +33,7 @@ import {
   listServices,
   listStaff,
   listSubcleanings,
+  recordOrderFold,
   recordPayment,
   deleteDailySale,
   deleteExpense,
@@ -53,6 +54,7 @@ import {
   updateStaff,
   updateDailySaleStatus,
   recordActivityLog,
+  totalFoldsForOrder,
   type ActivityLog,
   type Customer,
   type DailySale,
@@ -222,7 +224,7 @@ function foldCountRowsFromOrders(orders: OrderRow[], staff: Staff[]) {
   // Count per staff per load: foldedByStaffIds records one entry per load folded by that staff
   const grouped = new Map<number, { staffId: number; staffName: string; folds: number }>();
   orders
-    .filter((order) => order.workflowCompleted.includes('fold'))
+    .filter((order) => (order.foldedByStaffIds?.length ?? 0) > 0 || order.workflowCompleted.includes('fold'))
     .forEach((order) => {
       const staffIds: number[] = Array.isArray(order.foldedByStaffIds) && order.foldedByStaffIds.length
         ? order.foldedByStaffIds
@@ -393,7 +395,7 @@ function buildReportData(orders: OrderRow[], payments: Payment[], sales: DailySa
   const selectedTypes = new Set(selection.types);
   const manualSales = sales.filter((sale) => reportSelectionInRange(sale.saleDate, selection));
   const filteredExpenses = expenses.filter((expense) => reportSelectionInRange(expense.expenseDate, selection));
-  const foldOrders = orders.filter((order) => order.workflowCompleted.includes('fold') && reportSelectionInRange(foldDateForOrder(order), selection));
+  const foldOrders = orders.filter((order) => ((order.foldedByStaffIds?.length ?? 0) > 0 || order.workflowCompleted.includes('fold')) && reportSelectionInRange(foldDateForOrder(order), selection));
   const filteredFoldCounts = foldCountRowsFromOrders(foldOrders, staff);
 
   const paymentsInRange = payments.filter((payment) => reportSelectionInRange(localDateFromIso(payment.receivedAt), selection));
@@ -1071,18 +1073,9 @@ function renderOrderRow(order: OrderRow, staff: Staff[], services: LaundryServic
   const isAdmin = state.currentUser?.role === 'admin';
   const canCancel = order.status !== 'claimed' && order.paidAmount <= 0;
   const canDelete = order.status !== 'claimed' && isAdmin && order.paidAmount > 0;
-  
-  let totalFolds = 1;
-  if (order.serviceLines) {
-    let folds = 0;
-    order.serviceLines.forEach(line => {
-      const srv = services.find(s => s.id === line.id);
-      if (srv && Array.isArray(srv.includes) && srv.includes.includes('Fold')) {
-        folds += line.quantity;
-      }
-    });
-    if (folds > 0) totalFolds = folds;
-  }
+  const totalFolds = totalFoldsForOrder(order, services);
+  const savedFoldStaffIds = Array.isArray(order.foldedByStaffIds) ? order.foldedByStaffIds : [];
+  const remainingFolds = Math.max(0, totalFolds - savedFoldStaffIds.length);
 
   return `
     <tr class="order-row-main">
@@ -1096,13 +1089,19 @@ function renderOrderRow(order: OrderRow, staff: Staff[], services: LaundryServic
       </td>` : ''}
       <td>
       <div class="row-actions">
-        ${nextStep?.key === 'fold' ? `<form class="inline-form advance-form flex-wrap" data-order-id="${order.id}">
-          ${needsFoldStaff ? Array.from({ length: totalFolds }).map((_, i) => `<select name="assignedStaffId" required>
-            <option value="">-- Staff ${totalFolds > 1 ? `(Fold ${i + 1})` : ''}--</option>
+        ${nextStep?.key === 'fold' ? `<div class="inline-form flex-wrap fold-actions" data-order-id="${order.id}">
+          ${savedFoldStaffIds.map((staffId, index) => {
+            const person = staff.find((member) => member.id === staffId);
+            return `<span class="fold-saved-badge">Fold ${index + 1}: ${escapeHtml(person?.name ?? 'Staff')}</span>`;
+          }).join('')}
+          ${needsFoldStaff && remainingFolds > 0 ? Array.from({ length: remainingFolds }).map((_, i) => {
+            const foldNumber = savedFoldStaffIds.length + i + 1;
+            return `<select name="assignedStaffId" class="fold-staff-select" data-order-id="${order.id}" data-fold-number="${foldNumber}">
+            <option value="">-- Staff ${totalFolds > 1 ? `(Fold ${foldNumber})` : ''}--</option>
             ${staff.map((person) => `<option value="${person.id}">${escapeHtml(person.name)}</option>`).join('')}
-          </select>`).join('') : ''}
-          <button class="secondary" type="submit">Fold</button>
-        </form>` : nextStep?.key === 'claimed' && !claimedDone ? `<form class="inline-form advance-form" data-order-id="${order.id}" data-action="claim" data-balance="${order.balance}">
+          </select>`;
+          }).join('') : ''}
+        </div>` : nextStep?.key === 'claimed' && !claimedDone ? `<form class="inline-form advance-form" data-order-id="${order.id}" data-action="claim" data-balance="${order.balance}">
           <select name="releasedBy" required>
             <option value="">-- Released by --</option>
             ${staff.map((person) => `<option value="${person.id}">${escapeHtml(person.name)}</option>`).join('')}
@@ -2454,6 +2453,23 @@ function bindOrderForms(data: Awaited<ReturnType<typeof loadData>>) {
     });
   });
 
+  document.querySelectorAll<HTMLSelectElement>('.fold-staff-select').forEach((select) => {
+    select.addEventListener('change', async () => {
+      const staffId = Number(select.value);
+      if (!staffId) return;
+      const orderId = Number(select.dataset.orderId);
+      select.disabled = true;
+      try {
+        await recordOrderFold(orderId, staffId);
+        await recordUiLog('Record fold', `Order ID ${orderId} (Fold ${select.dataset.foldNumber ?? ''})`);
+        await render();
+      } catch (error) {
+        select.disabled = false;
+        alert(error instanceof Error ? error.message : 'Could not save fold.');
+      }
+    });
+  });
+
   document.querySelectorAll<HTMLFormElement>('.claim-payment-form').forEach((form) => {
     const method = form.querySelector<HTMLSelectElement>('select[name="method"]');
     const reference = form.querySelector<HTMLInputElement>('input[name="reference"]');
@@ -2803,12 +2819,15 @@ function bindReportActions(orders: OrderRow[], payments: Payment[], sales: Daily
       return [155, 125, 125, 125, 95, 95, 115, 115];
     };
     const sheetXml = sheets.map((sheet) => {
-      const columnXml = columnsForSheet(sheet.name)
+      const columnWidths = columnsForSheet(sheet.name);
+      const maxColumns = Math.max(columnWidths.length, ...sheet.rows.map((row) => row.length), 1);
+      const rowCount = Math.max(sheet.rows.length, 1);
+      const columnXml = columnWidths
         .map((width) => `<Column ss:Width="${width}" ss:AutoFitWidth="0"/>`)
         .join('');
       const rowXml = sheet.rows.map((row) => {
         if (!row.length) return '<Row ss:Height="10" ss:StyleID="BorderRow"><Cell ss:StyleID="BorderCell"><Data ss:Type="String">&nbsp;</Data></Cell></Row>';
-        const isHeaderRow = row[0] === 'Type' || row[0] === 'Summary' || row[0] === 'Sales Summary' || row[0] === 'Disbursement Summary' || row[0] === 'Staff' || row[0] === 'Date of Sales' || row[0] === 'Date' || row[0] === 'Date/Month';
+        const isHeaderRow = row[0] === 'Type' || row[0] === 'Summary' || row[0] === 'Sales Summary' || row[0] === 'Disbursement Summary' || row[0] === 'Staff' || row[0] === 'Date of Sales' || row[0] === 'Date' || row[0] === 'Date/Month' || row[0] === 'Ticket';
         const rowStyle = isHeaderRow ? 'HeaderRow' : 'BorderRow';
         const cellStyle = isHeaderRow ? 'HeaderCell' : 'BorderCell';
         const rowHeight = isHeaderRow ? 26 : 22;
@@ -2817,7 +2836,7 @@ function bindReportActions(orders: OrderRow[], payments: Payment[], sales: Daily
       }).join('');
       return `
         <Worksheet ss:Name="${xmlEscape(sheet.name)}">
-          <Table>
+          <Table ss:ExpandedColumnCount="${maxColumns}" ss:ExpandedRowCount="${rowCount}">
             ${columnXml}
             ${rowXml}
           </Table>
@@ -2904,30 +2923,28 @@ function bindReportActions(orders: OrderRow[], payments: Payment[], sales: Daily
     if (report.selectedTypes.has('summary')) sheets.push({ name: 'Summary', rows: report.summaryRows() });
     const html = workbookFromSheets(sheets.length ? sheets : [{ name: 'Summary', rows: report.summaryRows() }]);
     const fileName = `laba101-report-${selection.from}-to-${selection.to}.xls`;
-    return new File([html], fileName, { type: 'application/vnd.ms-excel' });
+    return { fileName, content: html };
   };
   const saveReportToDevice = async () => {
-    const file = reportFile();
+    const { fileName, content } = reportFile();
     if (!Capacitor.isNativePlatform()) {
-      return { fileName: file.name, uri: '' };
+      return { fileName, uri: '' };
     }
 
-    const html = await file.text();
-    const path = file.name;
+    const path = fileName;
     await Filesystem.writeFile({
       path,
-      data: html,
-      directory: Directory.External,
+      data: content,
+      directory: Directory.Cache,
       encoding: Encoding.UTF8,
+      recursive: true,
     });
-    const { uri } = await Filesystem.getUri({ path, directory: Directory.External });
-    return { fileName: file.name, uri };
+    const { uri } = await Filesystem.getUri({ path, directory: Directory.Cache });
+    return { fileName, uri };
   };
   const downloadReport = () => {
-    const html = reportFile();
-    const range = currentReportSelection();
-    const fileName = `laba101-report-${range.from}-to-${range.to}.xls`;
-    const blob = html;
+    const { fileName, content } = reportFile();
+    const blob = new Blob([content], { type: 'application/vnd.ms-excel;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;

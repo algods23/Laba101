@@ -1883,6 +1883,23 @@ legend {
   gap: 4px;
 }
 
+.orders-data-table .row-actions .fold-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fold-saved-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #ecfdf5;
+  color: #047857;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
 .app-record-table {
   min-width: 760px;
   table-layout: auto;

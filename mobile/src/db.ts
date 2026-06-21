@@ -220,6 +220,8 @@ export const defaultLoginAccounts = [
   { role: 'Admin', branch: 'Main Store', email: 'admin@laba101.test', password: 'password' },
   { role: 'Admin (Mintal)', branch: 'Mintal Branch', email: 'admin@laba101.mintal', password: 'password' },
   { role: 'Admin (Gensan)', branch: 'Gensan Branch', email: 'admin@laba101.gensan', password: 'password' },
+  { role: 'Staff (Mintal - Biya)', branch: 'Mintal Branch', email: 'biya@laba101.mintal', password: 'password' },
+  { role: 'Staff (Mintal - Jam)', branch: 'Mintal Branch', email: 'jam@laba101.mintal', password: 'password' },
   { role: 'Staff (Gensan)', branch: 'Gensan Branch', email: 'staff@laba101.gensan', password: 'password' },
 ] as const;
 
@@ -228,6 +230,8 @@ const seedStaff: Staff[] = [
   { id: 2, name: 'Mintal Branch Admin', email: 'admin@laba101.mintal', password: 'password', role: 'admin', branch: 'Mintal Branch' },
   { id: 3, name: 'Gensan Branch Admin', email: 'admin@laba101.gensan', password: 'password', role: 'admin', branch: 'Gensan Branch' },
   { id: 4, name: 'Gensan Branch Staff', email: 'staff@laba101.gensan', password: 'password', role: 'staff', branch: 'Gensan Branch' },
+  { id: 5, name: 'Biya', email: 'biya@laba101.mintal', password: 'password', role: 'staff', branch: 'Mintal Branch' },
+  { id: 6, name: 'Jam', email: 'jam@laba101.mintal', password: 'password', role: 'staff', branch: 'Mintal Branch' },
 ];
 
 const seedCustomers: Customer[] = [];
@@ -973,6 +977,69 @@ function statusFromCompleted(completed: string[]) {
   return 'received';
 }
 
+export function totalFoldsForOrder(order: Pick<OrderRow, 'serviceId' | 'serviceLines'>, services: LaundryService[]) {
+  const serviceLines = order.serviceLines?.length
+    ? order.serviceLines
+    : order.serviceId
+      ? [{ id: order.serviceId, quantity: 1 }]
+      : [];
+  let folds = 0;
+  serviceLines.forEach((line) => {
+    const service = services.find((item) => item.id === line.id);
+    if (service && Array.isArray(service.includes) && service.includes.includes('Fold')) {
+      folds += Number(line.quantity ?? 1);
+    }
+  });
+  return folds > 0 ? folds : 1;
+}
+
+async function persistOrder(dbOrBrowser: 'browser' | SQLiteDBConnection, order: OrderRow) {
+  if (dbOrBrowser === 'browser') {
+    const all = readBrowser<OrderRow[]>('orders', seedOrders);
+    const existing = all.find((item) => item.id === order.id);
+    if (existing) Object.assign(existing, order);
+    writeBrowser('orders', all);
+    return;
+  }
+  await dbOrBrowser.run(
+    'UPDATE orders SET workflowCompleted = ?, status = ?, foldedBy = ?, foldedByStaffIds = ?, foldedAt = ?, releasedBy = ? WHERE id = ?',
+    [JSON.stringify(order.workflowCompleted), order.status, order.foldedBy, JSON.stringify(order.foldedByStaffIds ?? []), order.foldedAt ?? null, order.releasedBy, order.id],
+  );
+}
+
+/** Record one fold assignment; completes the fold step when all loads are folded. */
+export async function recordOrderFold(orderId: number, staffId: number) {
+  if (!staffId) return;
+  const branch = await getBranch();
+  const [orders, services] = await Promise.all([listOrders(branch), listServices()]);
+  const order = orders.find((item) => item.id === orderId);
+  if (!order) return;
+
+  const nextStep = workflowSteps(order, services).find((step) => !order.workflowCompleted.includes(step.key));
+  if (nextStep?.key !== 'fold') return;
+
+  const totalFolds = totalFoldsForOrder(order, services);
+  const ids = Array.isArray(order.foldedByStaffIds) ? [...order.foldedByStaffIds] : [];
+  if (ids.length >= totalFolds) return;
+
+  ids.push(staffId);
+  order.foldedByStaffIds = ids;
+  order.foldedBy = order.foldedBy || staffId;
+  order.foldedAt = order.foldedAt || nowIso();
+
+  if (ids.length >= totalFolds) {
+    order.workflowCompleted = [...order.workflowCompleted, 'fold'];
+  }
+  order.status = statusFromCompleted(order.workflowCompleted);
+
+  if (!Capacitor.isNativePlatform()) {
+    await persistOrder('browser', order);
+    return;
+  }
+  const db = await ensureNativeDb();
+  await persistOrder(db, order);
+}
+
 export async function listOrders(branch: string): Promise<OrderRow[]> {
   if (!Capacitor.isNativePlatform()) {
     return readBrowser<OrderRow[]>('orders', seedOrders)
@@ -1080,33 +1147,29 @@ export async function advanceOrder(orderId: number, assignedStaffId?: number | n
   const steps = workflowSteps(order, services).map((step) => step.key);
   const next = steps.find((key) => !order.workflowCompleted.includes(key));
   if (!next) return;
+
+  if (next === 'fold') {
+    const assignedIds = (Array.isArray(assignedStaffId) ? assignedStaffId : assignedStaffId ? [assignedStaffId] : [])
+      .map(Number)
+      .filter((id) => id > 0);
+    for (const staffId of assignedIds) {
+      await recordOrderFold(orderId, staffId);
+    }
+    return;
+  }
+
   order.workflowCompleted = [...order.workflowCompleted, next];
   order.status = statusFromCompleted(order.workflowCompleted);
-  if (next === 'fold' && assignedStaffId) {
-    const assignedIds = Array.isArray(assignedStaffId) ? assignedStaffId : [assignedStaffId];
-    order.foldedBy = assignedIds[0] || null;
-    order.foldedAt = nowIso();
-    // Append these staff IDs (one per load folded by that staff)
-    const ids = Array.isArray(order.foldedByStaffIds) ? [...order.foldedByStaffIds] : [];
-    ids.push(...assignedIds);
-    order.foldedByStaffIds = ids;
-  }
   if (next === 'claimed' && assignedStaffId) {
     const assignedIds = Array.isArray(assignedStaffId) ? assignedStaffId : [assignedStaffId];
     order.releasedBy = assignedIds[0] || null;
   }
   if (!Capacitor.isNativePlatform()) {
-    const all = readBrowser<OrderRow[]>('orders', seedOrders);
-    const existing = all.find((item) => item.id === order.id);
-    if (existing) Object.assign(existing, order);
-    writeBrowser('orders', all);
+    await persistOrder('browser', order);
     return;
   }
   const db = await ensureNativeDb();
-  await db.run(
-    'UPDATE orders SET workflowCompleted = ?, status = ?, foldedBy = ?, foldedByStaffIds = ?, foldedAt = ?, releasedBy = ? WHERE id = ?',
-    [JSON.stringify(order.workflowCompleted), order.status, order.foldedBy, JSON.stringify(order.foldedByStaffIds ?? []), order.foldedAt ?? null, order.releasedBy, order.id],
-  );
+  await persistOrder(db, order);
 }
 
 export async function recordPayment(orderId: number, input: { amount: number; method: 'cash' | 'gcash'; reference?: string | null }) {
