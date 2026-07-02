@@ -171,6 +171,7 @@ const state = {
   paymentModalOrderId: 0,
   dashboardSummaryModalOpen: false,
   reportPreview: null as ReportPreviewState | null,
+  monthlySummaryMonth: currentMonthInput(),
   endorseModalOpen: false,
   endorseSaleId: 0,
   endorseSaleDate: '',
@@ -269,6 +270,221 @@ function today() {
 
 function currentMonthInput() {
   return today().slice(0, 7);
+}
+
+function monthStartFromInput(monthValue: string) {
+  return `${monthValue}-01`;
+}
+
+function monthEndFromInput(monthValue: string) {
+  const [year, month] = monthValue.split('-').map((part) => Number(part));
+  if (!Number.isFinite(year) || !Number.isFinite(month)) return monthStartFromInput(currentMonthInput());
+  return localDateInput(new Date(year, month, 0));
+}
+
+function formatMonthLabel(monthValue: string) {
+  const [year, month] = monthValue.split('-').map((part) => Number(part));
+  if (!Number.isFinite(year) || !Number.isFinite(month)) return monthValue;
+  return new Intl.DateTimeFormat('en-PH', { month: 'long', year: 'numeric' }).format(new Date(year, month - 1, 1));
+}
+
+function reportBranchLabel(branch: string) {
+  return branch.toLowerCase().includes('mintal') ? 'Mintal, Davao City' : branch;
+}
+
+function disbursementSummaryLabel(expense: DisbursementExpense) {
+  const category = (expense.category ?? 'Uncategorized').trim();
+  if (/^other(s)?$/i.test(category)) {
+    return expense.name.trim() || category;
+  }
+  return category;
+}
+
+function isFullMonthSelection(from: string, to: string) {
+  const start = new Date(`${from}T00:00:00`);
+  const end = new Date(`${to}T00:00:00`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return false;
+  const monthStart = localDateInput(new Date(start.getFullYear(), start.getMonth(), 1));
+  const monthEnd = localDateInput(new Date(start.getFullYear(), start.getMonth() + 1, 0));
+  return from === monthStart && to === monthEnd;
+}
+
+function drawWrappedText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, maxWidth: number, lineHeight: number, align: CanvasTextAlign = 'left') {
+  const words = String(text ?? '').split(/\s+/).filter(Boolean);
+  if (!words.length) {
+    ctx.textAlign = align;
+    ctx.fillText('', x, y);
+    return y + lineHeight;
+  }
+
+  const lines: string[] = [];
+  let currentLine = words.shift() ?? '';
+  for (const word of words) {
+    const testLine = `${currentLine} ${word}`.trim();
+    if (ctx.measureText(testLine).width > maxWidth && currentLine) {
+      lines.push(currentLine);
+      currentLine = word;
+    } else {
+      currentLine = testLine;
+    }
+  }
+  lines.push(currentLine);
+
+  ctx.textAlign = align;
+  lines.forEach((line, index) => ctx.fillText(line, x, y + (index * lineHeight)));
+  return y + (lines.length * lineHeight);
+}
+
+function base64FromDataUrl(dataUrl: string) {
+  return dataUrl.split(',')[1] ?? '';
+}
+
+function monthlySummaryFileName(monthValue: string) {
+  return `laba101-monthly-summary-${monthValue}.jpg`;
+}
+
+function buildMonthlySummaryReport(orders: OrderRow[], payments: Payment[], sales: DailySale[], expenses: DisbursementExpense[], revolvingHistory: RevolvingHistory[], staff: Staff[], foldRate: number, monthValue: string, branch: string) {
+  const from = monthStartFromInput(monthValue);
+  const to = monthEndFromInput(monthValue);
+  const report = buildReportData(orders, payments, sales, expenses, revolvingHistory, staff, foldRate, { from, to, types: ['summary'] }, branch);
+  const salesData = report.salesRows();
+  const disbData = report.disbursementRows();
+  const netIncome = Number((salesData.totalSales - disbData.totalDisbursement).toFixed(2));
+  return {
+    monthValue,
+    monthLabel: formatMonthLabel(monthValue),
+    branchLabel: reportBranchLabel(branch),
+    salesData,
+    disbData,
+    totalDisbursement: disbData.totalDisbursement,
+    netIncome,
+  };
+}
+
+function renderMonthlySummaryImage(report: ReturnType<typeof buildMonthlySummaryReport>) {
+  const width = 1240;
+  const left = 84;
+  const right = width - 84;
+  const maxContentWidth = right - left;
+  const rowGap = 34;
+  const sectionGap = 34;
+  const categoryCount = Math.max(report.disbData.categoryTotals.length, 1);
+  const height = 540 + (categoryCount * 64) + 260;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Canvas is not available.');
+
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = '#061a42';
+  ctx.font = '800 58px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('Laba 101', width / 2, 106);
+
+  ctx.fillStyle = '#64748b';
+  ctx.font = '500 28px Arial';
+  ctx.fillText(report.branchLabel, width / 2, 152);
+  ctx.fillText(`For the month of ${report.monthLabel}`, width / 2, 192);
+
+  const drawDivider = (y: number) => {
+    ctx.strokeStyle = '#dbe3ef';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(left, y);
+    ctx.lineTo(right, y);
+    ctx.stroke();
+  };
+
+  let y = 238;
+  drawDivider(y);
+  y += 42;
+
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#061a42';
+  ctx.font = '800 34px Arial';
+  ctx.fillText('Total sales', left, y);
+  y += 50;
+  ctx.font = '500 28px Arial';
+  ctx.fillStyle = '#475569';
+  ctx.fillText('Cash:', left, y);
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#061a42';
+  ctx.font = '700 28px Arial';
+  ctx.fillText(money(report.salesData.totalCash), right, y);
+  y += rowGap;
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#475569';
+  ctx.font = '500 28px Arial';
+  ctx.fillText('GCash:', left, y);
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#061a42';
+  ctx.font = '700 28px Arial';
+  ctx.fillText(money(report.salesData.totalGcash), right, y);
+  y += rowGap;
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#475569';
+  ctx.font = '500 28px Arial';
+  ctx.fillText('Total:', left, y);
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#061a42';
+  ctx.font = '800 34px Arial';
+  ctx.fillText(money(report.salesData.totalSales), right, y);
+
+  y += sectionGap;
+  drawDivider(y);
+  y += 42;
+
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#061a42';
+  ctx.font = '800 34px Arial';
+  ctx.fillText('Total disbursement', left, y);
+  y += 50;
+
+  ctx.font = '500 28px Arial';
+  report.disbData.categoryTotals.forEach((category) => {
+    ctx.fillStyle = '#475569';
+    y = drawWrappedText(ctx, `${category.category}:`, left, y, maxContentWidth - 220, 34);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#061a42';
+    ctx.font = '700 28px Arial';
+    ctx.fillText(money(category.amount), right, y - 34);
+    y += 14;
+  });
+
+  if (!report.disbData.categoryTotals.length) {
+    ctx.fillStyle = '#64748b';
+    ctx.textAlign = 'left';
+    ctx.font = '500 28px Arial';
+    ctx.fillText('No disbursement records found.', left, y);
+    y += rowGap;
+  }
+
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#475569';
+  ctx.font = '500 28px Arial';
+  ctx.fillText('Total:', left, y + 12);
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#061a42';
+  ctx.font = '800 34px Arial';
+  ctx.fillText(money(report.totalDisbursement), right, y + 12);
+
+  y += sectionGap + 20;
+  drawDivider(y);
+  y += 54;
+
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#061a42';
+  ctx.font = '800 34px Arial';
+  ctx.fillText('Net income', left, y);
+  ctx.textAlign = 'right';
+  ctx.fillStyle = report.netIncome >= 0 ? '#16a34a' : '#dc2626';
+  ctx.font = '800 44px Arial';
+  ctx.fillText(money(report.netIncome), right, y);
+
+  return canvas.toDataURL('image/jpeg', 0.92);
 }
 
 function expenseType(expense: DisbursementExpense) {
@@ -391,7 +607,7 @@ function reportSelectionInRange(date: string, selection: { from: string; to: str
   return date >= selection.from && date <= selection.to;
 }
 
-function buildReportData(orders: OrderRow[], payments: Payment[], sales: DailySale[], expenses: DisbursementExpense[], revolvingHistory: RevolvingHistory[], staff: Staff[], foldRate: number, selection: { from: string; to: string; types: ReportType[] }) {
+function buildReportData(orders: OrderRow[], payments: Payment[], sales: DailySale[], expenses: DisbursementExpense[], revolvingHistory: RevolvingHistory[], staff: Staff[], foldRate: number, selection: { from: string; to: string; types: ReportType[] }, branch = '') {
   const selectedTypes = new Set(selection.types);
   const manualSales = sales.filter((sale) => reportSelectionInRange(sale.saleDate, selection));
   const filteredExpenses = expenses.filter((expense) => reportSelectionInRange(expense.expenseDate, selection));
@@ -489,7 +705,7 @@ function buildReportData(orders: OrderRow[], payments: Payment[], sales: DailySa
   const disbursementRows = () => {
     const categoryMap = new Map<string, number>();
     filteredExpenses.forEach((expense) => {
-      const cat = expense.category || 'Uncategorized';
+      const cat = disbursementSummaryLabel(expense);
       categoryMap.set(cat, (categoryMap.get(cat) ?? 0) + expense.amount);
     });
     const categoryTotals = Array.from(categoryMap.entries()).map(([category, amount]) => ({ category, amount }));
@@ -552,19 +768,23 @@ function buildReportData(orders: OrderRow[], payments: Payment[], sales: DailySa
     const disbursementData = disbursementRows();
     const cashOnHand = computeCashOnHand(salesData.totalCash, disbursementData.totalDisbursement);
     const netIncome = Number((salesData.totalSales - disbursementData.totalDisbursement).toFixed(2));
+    const monthLabel = isFullMonthSelection(selection.from, selection.to) ? formatMonthLabel(selection.from.slice(0, 7)) : `${selection.from} to ${selection.to}`;
     return [
-      ['Summary', selection.from, 'to', selection.to],
+      ['Laba 101'],
+      [reportBranchLabel(branch)],
+      [`For the month of ${monthLabel}`],
       [],
-      ['Total Sales:', '', ''],
-      ['Cash:', '', salesData.totalCash],
-      ['GCash:', '', salesData.totalGcash],
-      ['Total:', '', salesData.totalSales],
+      ['Total sales'],
+      ['Cash', '', salesData.totalCash],
+      ['GCash', '', salesData.totalGcash],
+      ['Total', '', salesData.totalSales],
       [],
-      ['Total Disbursement:', '', disbursementData.totalDisbursement],
+      ['Total disbursement'],
+      ...disbursementData.categoryTotals.map((category) => [category.category, '', category.amount]),
+      ['Total disbursement', '', disbursementData.totalDisbursement],
       [],
-      ['Cash on Hand (Cash - Total Disbursement):', '', cashOnHand],
-      [],
-      ['Net Income (Total Sales - Total Disbursement):', '', netIncome],
+      ['Cash on hand', '', cashOnHand],
+      ['Net income', '', netIncome],
     ];
   };
 
@@ -742,7 +962,7 @@ async function render() {
         ${state.tab === 'customers' ? renderCustomers(data.customers, data.orders) : ''}
         ${state.tab === 'pricing' ? renderPricing(data.allServices, data.categories) : ''}
         ${state.tab === 'disbursements' ? renderDisbursements(data.expenses, data.sales) : ''}
-        ${state.tab === 'reports' ? renderReports(data.orders, data.payments, data.sales, data.expenses, data.revolvingHistory, data.allStaff, data.foldRate, salesTotal, disbursementTotal, profit) : ''}
+        ${state.tab === 'reports' ? renderReports(data.orders, data.payments, data.sales, data.expenses, data.revolvingHistory, data.allStaff, data.foldRate, salesTotal, disbursementTotal, profit, data.branch) : ''}
         ${state.tab === 'logs' ? renderLogs(data.activityLogs) : ''}
         ${state.tab === 'inventory' ? renderInventory(data.inventoryItems, data.inventoryMovements, data.branch) : ''}
         ${state.tab === 'maintenance' ? renderMaintenance(data.machines, data.subcleanings, data.branch) : ''}
@@ -757,7 +977,7 @@ async function render() {
   bindOrderForms(data);
   bindPricingForms(data.allServices);
   bindDisbursementForms(data.expenses);
-  bindReportActions(data.orders, data.payments, data.sales, data.expenses, data.revolvingHistory, data.allStaff, data.foldRate);
+  bindReportActions(data.orders, data.payments, data.sales, data.expenses, data.revolvingHistory, data.allStaff, data.foldRate, data.branch);
   bindOrderFilters();
   bindCustomerSearch();
   bindMaintenanceForms();
@@ -1588,8 +1808,8 @@ function reportPreviewCell(value: string | number, index: number) {
   return escapeHtml(value ?? '');
 }
 
-function renderReports(orders: OrderRow[], payments: Payment[], sales: DailySale[], expenses: DisbursementExpense[], revolvingHistory: RevolvingHistory[], staff: Staff[], foldRate: number, salesTotal: number, disbursementTotal: number, profit: number) {
-  const preview = state.reportPreview ? buildReportData(orders, payments, sales, expenses, revolvingHistory, staff, foldRate, state.reportPreview) : null;
+function renderReports(orders: OrderRow[], payments: Payment[], sales: DailySale[], expenses: DisbursementExpense[], revolvingHistory: RevolvingHistory[], staff: Staff[], foldRate: number, salesTotal: number, disbursementTotal: number, profit: number, branch: string) {
+  const preview = state.reportPreview ? buildReportData(orders, payments, sales, expenses, revolvingHistory, staff, foldRate, state.reportPreview, branch) : null;
   return `
     <section class="page-head">
       <div>
@@ -1631,6 +1851,18 @@ function renderReports(orders: OrderRow[], payments: Payment[], sales: DailySale
         <div>
           <button class="secondary" id="generate-report" type="button">Generate report</button>
           <button class="secondary" id="email-report" type="button">Send File</button>
+        </div>
+      </div>
+      <div class="monthly-summary-panel">
+        <div class="monthly-summary-panel-head">
+          <div>
+            <h3>Monthly net income summary</h3>
+            <p>Generates a JPG only, ready to share through email or messenger from the device share sheet.</p>
+          </div>
+          <div class="report-month-controls">
+            <label>Month<input type="month" data-month-summary value="${escapeHtml(state.monthlySummaryMonth)}" /></label>
+            <button class="primary" id="generate-monthly-summary" type="button">Generate monthly summary</button>
+          </div>
         </div>
       </div>
     </section>
@@ -1745,14 +1977,17 @@ function renderReports(orders: OrderRow[], payments: Payment[], sales: DailySale
         ${preview.selectedTypes.has('summary') ? (() => {
           const salesData = preview.salesRows();
           const disbData = preview.disbursementRows();
-          const cashOnHand = computeCashOnHand(salesData.totalCash, disbData.totalDisbursement);
           const netIncome = Number((salesData.totalSales - disbData.totalDisbursement).toFixed(2));
+          const monthLabel = isFullMonthSelection(preview.selection.from, preview.selection.to) ? formatMonthLabel(preview.selection.from.slice(0, 7)) : `${preview.selection.from} to ${preview.selection.to}`;
           return `
           <article>
-            ${sectionTitle('Summary preview', `${preview.selection.from} to ${preview.selection.to}`)}
-            <div class="summary-report-layout">
-              <div class="summary-section">
-                <div class="summary-section-header">Total Sales</div>
+            <div class="monthly-summary-slip">
+              <div class="monthly-summary-title">Laba 101</div>
+              <div class="monthly-summary-branch">${escapeHtml(reportBranchLabel(branch))}</div>
+              <div class="monthly-summary-period">For the month of ${escapeHtml(monthLabel)}</div>
+              <div class="monthly-summary-divider"></div>
+              <div class="monthly-summary-section">
+                <div class="monthly-summary-heading">Total sales</div>
                 <div class="summary-detail-row">
                   <span>Cash:</span><strong>${money(salesData.totalCash)}</strong>
                 </div>
@@ -1763,35 +1998,28 @@ function renderReports(orders: OrderRow[], payments: Payment[], sales: DailySale
                   <span>Total:</span><strong>${money(salesData.totalSales)}</strong>
                 </div>
               </div>
-              <div class="summary-divider"></div>
-              <div class="summary-section">
-                <div class="summary-section-header">Total Disbursement</div>
+              <div class="monthly-summary-divider"></div>
+              <div class="monthly-summary-section">
+                <div class="monthly-summary-heading">Total disbursement</div>
+                ${disbData.categoryTotals.map((cat) => `
+                  <div class="summary-detail-row monthly-summary-category-row">
+                    <span>${escapeHtml(cat.category)}:</span><strong>${money(cat.amount)}</strong>
+                  </div>
+                `).join('')}
                 <div class="summary-detail-row summary-total-row">
-                  <span></span><strong>${money(disbData.totalDisbursement)}</strong>
+                  <span>Total:</span><strong>${money(disbData.totalDisbursement)}</strong>
                 </div>
               </div>
-              <div class="summary-divider"></div>
-              <div class="summary-section">
-                <div class="summary-section-header">Cash on Hand</div>
-                <div class="summary-detail-row summary-formula">
-                  <span>Cash − Total Disbursement</span>
-                </div>
-                <div class="summary-detail-row summary-total-row">
-                  <span></span><strong>${money(cashOnHand)}</strong>
-                </div>
-              </div>
-              <div class="summary-divider"></div>
-              <div class="summary-section">
-                <div class="summary-section-header">Net Income</div>
-                <div class="summary-detail-row summary-formula">
-                  <span>Total Sales − Total Disbursement</span>
-                </div>
+              <div class="monthly-summary-divider"></div>
+              <div class="monthly-summary-section">
+                <div class="monthly-summary-heading">Net income</div>
                 <div class="summary-detail-row summary-total-row">
                   <span></span><strong class="${netIncome >= 0 ? 'positive' : 'negative'}">${money(netIncome)}</strong>
                 </div>
               </div>
             </div>
           </article>`;
+        })() : ''}
         })() : ''}
       </section>
     ` : ''}
@@ -2801,10 +3029,93 @@ function bindDisbursementForms(expenses: DisbursementExpense[]) {
   });
 }
 
-function bindReportActions(orders: OrderRow[], payments: Payment[], sales: DailySale[], expenses: DisbursementExpense[], revolvingHistory: RevolvingHistory[], staff: Staff[], foldRate: number) {
+function bindReportActions(orders: OrderRow[], payments: Payment[], sales: DailySale[], expenses: DisbursementExpense[], revolvingHistory: RevolvingHistory[], staff: Staff[], foldRate: number, branch: string) {
   document.querySelector<HTMLButtonElement>('#generate-report')?.addEventListener('click', () => {
     state.reportPreview = currentReportSelection();
     void render();
+  });
+
+  const monthSummaryInput = document.querySelector<HTMLInputElement>('[data-month-summary]');
+  if (monthSummaryInput) {
+    monthSummaryInput.addEventListener('change', () => {
+      state.monthlySummaryMonth = monthSummaryInput.value || currentMonthInput();
+    });
+  }
+
+  const monthlySummaryArtifact = () => {
+    const monthValue = monthSummaryInput?.value || state.monthlySummaryMonth || currentMonthInput();
+    state.monthlySummaryMonth = monthValue;
+    const report = buildMonthlySummaryReport(orders, payments, sales, expenses, revolvingHistory, staff, foldRate, monthValue, branch);
+    return {
+      fileName: monthlySummaryFileName(monthValue),
+      dataUrl: renderMonthlySummaryImage(report),
+      report,
+    };
+  };
+
+  const saveMonthlySummaryToDevice = async () => {
+    const { fileName, dataUrl } = monthlySummaryArtifact();
+    if (!Capacitor.isNativePlatform()) {
+      return { fileName, uri: '', dataUrl };
+    }
+
+    const path = fileName;
+    await Filesystem.writeFile({
+      path,
+      data: base64FromDataUrl(dataUrl),
+      directory: Directory.Cache,
+      recursive: true,
+    });
+    const { uri } = await Filesystem.getUri({ path, directory: Directory.Cache });
+    return { fileName, uri, dataUrl };
+  };
+
+  const downloadMonthlySummary = () => {
+    const { fileName, dataUrl } = monthlySummaryArtifact();
+    const link = document.createElement('a');
+    link.href = dataUrl;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    setTimeout(() => { link.remove(); }, 1000);
+    return fileName;
+  };
+
+  const shareOrDownloadMonthlySummary = async () => {
+    const btn = document.querySelector<HTMLButtonElement>('#generate-monthly-summary');
+    if (btn) { btn.disabled = true; btn.textContent = 'Generating...'; }
+    try {
+      if (Capacitor.isNativePlatform()) {
+        const saved = await saveMonthlySummaryToDevice();
+        try {
+          await Share.share({
+            title: `Laba101 monthly summary ${saved.report.monthLabel}`,
+            text: `Please find the attached monthly summary image: ${saved.fileName}`,
+            files: [saved.uri],
+            dialogTitle: 'Share monthly summary',
+          });
+          alert(`Monthly summary saved and shared as "${saved.fileName}".`);
+        } catch (shareError) {
+          const message = String(shareError).toLowerCase();
+          if (message.includes('share canceled') || message.includes('canceled')) {
+            alert(`Monthly summary saved as "${saved.fileName}".`);
+          } else {
+            throw shareError;
+          }
+        }
+      } else {
+        const fileName = downloadMonthlySummary();
+        alert(`Monthly summary downloaded as "${fileName}".`);
+      }
+    } catch (err) {
+      alert('Failed: ' + String(err));
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Generate monthly summary'; }
+    }
+  };
+
+  document.querySelector<HTMLButtonElement>('#generate-monthly-summary')?.addEventListener('click', async () => {
+    await shareOrDownloadMonthlySummary();
   });
 
   const salesForm = document.querySelector<HTMLFormElement>('#sales-form');
@@ -2967,7 +3278,7 @@ function bindReportActions(orders: OrderRow[], payments: Payment[], sales: Daily
   };
   const reportFile = () => {
     const selection = currentReportSelection();
-    const report = buildReportData(orders, payments, sales, expenses, revolvingHistory, staff, foldRate, selection);
+    const report = buildReportData(orders, payments, sales, expenses, revolvingHistory, staff, foldRate, selection, branch);
     const sheets: Array<{ name: string; rows: Array<Array<string | number>> }> = [];
     if (report.selectedTypes.has('sales')) {
       const salesData = report.salesRows();
