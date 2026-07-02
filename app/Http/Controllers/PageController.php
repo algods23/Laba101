@@ -694,7 +694,10 @@ class PageController extends Controller
                 CarbonImmutable::parse($dateFrom)->startOfDay(),
                 CarbonImmutable::parse($dateTo)->endOfDay(),
             ],
-            default => [$today->startOfDay(), $today->endOfDay()],
+            default => [
+                CarbonImmutable::parse($dateFrom)->startOfDay(),
+                CarbonImmutable::parse($dateTo)->endOfDay(),
+            ],
         };
     }
 
