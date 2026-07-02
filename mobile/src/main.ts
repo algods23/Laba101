@@ -1714,7 +1714,10 @@ function renderDisbursements(expenses: DisbursementExpense[], sales: DailySale[]
   const todayValue = today();
   const monthValue = todayValue.slice(0, 7);
   const isAdmin = state.currentUser?.role === 'admin';
-  const expenseCategoryOptions = Array.from(new Set([...disbursementCategories, ...expenses.map((expense) => expense.category).filter(Boolean)]));
+  const customExpenseCategories = expenses
+    .map((expense) => expense.category)
+    .filter((category): category is string => Boolean(category) && category !== 'Other' && !disbursementCategories.includes(category));
+  const expenseCategoryOptions = Array.from(new Set([...disbursementCategories.filter((category) => category !== 'Other'), ...customExpenseCategories, 'Other']));
   const dailyExpense = expenses.filter((item) => expenseType(item) === 'daily' && item.expenseDate === todayValue).reduce((sum, item) => sum + item.amount, 0);
   const monthlyExpense = expenses.filter((item) => expenseType(item) === 'monthly' && item.expenseDate.startsWith(monthValue)).reduce((sum, item) => sum + item.amount, 0);
   const todaysManualSales = sales.filter((item) => item.saleDate === todayValue).reduce((sum, item) => sum + item.totalAmount, 0);
@@ -1754,8 +1757,8 @@ function renderDisbursements(expenses: DisbursementExpense[], sales: DailySale[]
             <label class="expense-month-field" hidden>Month<input name="expenseMonth" type="month" value="${currentMonthInput()}" /></label>
             <label>Amount<input name="amount" type="number" min="0" step="0.01" required placeholder="0.00" /></label>
           </div>
-          <div class="form-row"><label>Title / Name<input name="name" required /></label><label>Category<select name="category" required>${expenseCategoryOptions.map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`).join('')}</select></label></div>
-          <label>Description<textarea name="description"></textarea></label>
+          <div class="form-row"><label>Title / Name<input name="name" required /></label><label>Category<select name="category" data-expense-category-select required>${expenseCategoryOptions.map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`).join('')}</select></label></div>
+          <label class="expense-category-custom-field" data-expense-category-custom-field hidden>Specify category<input name="categoryCustom" type="text" placeholder="e.g. Office supplies" /></label>
           <button class="primary" type="submit">Save expense</button>
         </form>
       </article>
@@ -2952,6 +2955,9 @@ function bindDisbursementForms(expenses: DisbursementExpense[]) {
   const expenseMonthField = expenseForm?.querySelector<HTMLElement>('.expense-month-field');
   const expenseDateInput = expenseForm?.querySelector<HTMLInputElement>('input[name="expenseDate"]');
   const expenseMonthInput = expenseForm?.querySelector<HTMLInputElement>('input[name="expenseMonth"]');
+  const expenseCategorySelect = expenseForm?.querySelector<HTMLSelectElement>('[data-expense-category-select]');
+  const expenseCategoryCustomField = expenseForm?.querySelector<HTMLElement>('[data-expense-category-custom-field]');
+  const expenseCategoryCustomInput = expenseForm?.querySelector<HTMLInputElement>('input[name="categoryCustom"]');
   const setExpenseType = (type: 'daily' | 'monthly') => {
     if (!expenseForm || !expenseTypeInput || !expenseDateInput || !expenseMonthInput) return;
     expenseTypeInput.value = type;
@@ -2965,22 +2971,38 @@ function bindDisbursementForms(expenses: DisbursementExpense[]) {
     if (type === 'monthly' && !expenseMonthInput.value) expenseMonthInput.value = currentMonthInput();
     if (type === 'daily' && !expenseDateInput.value) expenseDateInput.value = today();
   };
+  const setExpenseCategoryMode = () => {
+    if (!expenseCategorySelect || !expenseCategoryCustomField || !expenseCategoryCustomInput) return;
+    const isOther = expenseCategorySelect.value === 'Other';
+    expenseCategoryCustomField.hidden = !isOther;
+    expenseCategoryCustomInput.required = isOther;
+    if (!isOther) expenseCategoryCustomInput.value = '';
+  };
   expenseForm?.querySelectorAll<HTMLButtonElement>('[data-expense-type]').forEach((button) => {
     button.addEventListener('click', () => setExpenseType(button.dataset.expenseType === 'monthly' ? 'monthly' : 'daily'));
   });
+  expenseCategorySelect?.addEventListener('change', setExpenseCategoryMode);
   setExpenseType('daily');
+  setExpenseCategoryMode();
   expenseForm?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const fd = new FormData(event.currentTarget);
     const id = Number(fd.get('id') || 0);
     const disbursementType = String(fd.get('disbursementType') ?? 'daily') === 'monthly' ? 'monthly' : 'daily';
     const monthValue = String(fd.get('expenseMonth') ?? currentMonthInput());
+    const selectedCategory = String(fd.get('category') ?? '').trim();
+    const customCategory = String(fd.get('categoryCustom') ?? '').trim();
+    const category = selectedCategory === 'Other' ? customCategory : selectedCategory;
+    if (!category) {
+      alert('Please enter a category name.');
+      return;
+    }
     const input = {
       expenseDate: disbursementType === 'monthly' ? `${monthValue}-01` : String(fd.get('expenseDate') ?? ''),
       disbursementType,
       name: String(fd.get('name') ?? ''),
-      category: String(fd.get('category') ?? ''),
-      description: String(fd.get('description') ?? ''),
+      category,
+      description: '',
       amount: Number(fd.get('amount') ?? 0),
     };
     if (disbursementType === 'daily' && input.expenseDate !== today()) {
@@ -3003,10 +3025,11 @@ function bindDisbursementForms(expenses: DisbursementExpense[]) {
       (expenseForm.querySelector('[name=expenseDate]') as HTMLInputElement).value = expense.expenseDate;
       (expenseForm.querySelector('[name=expenseMonth]') as HTMLInputElement).value = expenseMonthValue(expense.expenseDate);
       setExpenseType(expenseType(expense));
+      if (expenseCategorySelect) expenseCategorySelect.value = expense.category || 'Other';
+      if (expenseCategoryCustomInput) expenseCategoryCustomInput.value = expenseCategorySelect?.value === 'Other' ? '' : '';
+      setExpenseCategoryMode();
       (expenseForm.querySelector('[name=amount]') as HTMLInputElement).value = String(expense.amount);
       (expenseForm.querySelector('[name=name]') as HTMLInputElement).value = expense.name;
-      (expenseForm.querySelector('[name=category]') as HTMLSelectElement).value = expense.category;
-      (expenseForm.querySelector('[name=description]') as HTMLTextAreaElement).value = expense.description ?? '';
       const submitButton = expenseForm.querySelector<HTMLButtonElement>('button[type="submit"]');
       if (submitButton) submitButton.textContent = 'Update expense';
       expenseForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -3122,7 +3145,7 @@ function bindReportActions(orders: OrderRow[], payments: Payment[], sales: Daily
   salesForm?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const fd = new FormData(event.currentTarget);
-    await saveDailySale({ id: Number(fd.get('id') || 0) || undefined, saleDate: String(fd.get('saleDate') ?? ''), cashAmount: Number(fd.get('cashAmount') ?? 0), gcashAmount: Number(fd.get('gcashAmount') ?? 0), notes: String(fd.get('notes') ?? '') });
+    await saveDailySale({ id: Number(fd.get('id') || 0) || undefined, saleDate: String(fd.get('saleDate') ?? ''), cashAmount: Number(fd.get('cashAmount') ?? 0), gcashAmount: Number(fd.get('gcashAmount') ?? 0), notes: '' });
     await render();
   });
   document.querySelectorAll<HTMLButtonElement>('.edit-sale-btn').forEach((btn) => {
@@ -3133,7 +3156,6 @@ function bindReportActions(orders: OrderRow[], payments: Payment[], sales: Daily
       (salesForm.querySelector('[name=saleDate]') as HTMLInputElement).value = sale.saleDate;
       (salesForm.querySelector('[name=cashAmount]') as HTMLInputElement).value = String(sale.cashAmount);
       (salesForm.querySelector('[name=gcashAmount]') as HTMLInputElement).value = String(sale.gcashAmount);
-      (salesForm.querySelector('[name=notes]') as HTMLTextAreaElement).value = sale.notes ?? '';
       const submitButton = salesForm.querySelector<HTMLButtonElement>('button[type="submit"]');
       if (submitButton) submitButton.textContent = 'Update daily sale';
       salesForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
