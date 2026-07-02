@@ -56,6 +56,46 @@ class DatabaseSeeder extends Seeder
             ]
         );
 
+        User::query()->updateOrCreate(
+            ['email' => 'jam@laba101.mintal'],
+            [
+                'name' => 'Jam',
+                'password' => Hash::make('password'),
+                'role' => 'staff',
+                'branch' => 'Mintal',
+            ]
+        );
+
+        User::query()->updateOrCreate(
+            ['email' => 'jelian@laba101.mintal'],
+            [
+                'name' => 'Jelian',
+                'password' => Hash::make('password'),
+                'role' => 'staff',
+                'branch' => 'Mintal',
+            ]
+        );
+
+        User::query()->updateOrCreate(
+            ['email' => 'hany@laba101.mintal'],
+            [
+                'name' => 'Hany',
+                'password' => Hash::make('password'),
+                'role' => 'staff',
+                'branch' => 'Mintal',
+            ]
+        );
+
+        User::query()->updateOrCreate(
+            ['email' => 'biya@laba101.mintal'],
+            [
+                'name' => 'Biya',
+                'password' => Hash::make('password'),
+                'role' => 'staff',
+                'branch' => 'Mintal',
+            ]
+        );
+
         collect([
             'Wash & Fold' => 'Drop-off',
             'Dry Clean' => 'Full Service',
