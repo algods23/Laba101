@@ -3232,7 +3232,7 @@ function bindReportActions(orders: OrderRow[], payments: Payment[], sales: Daily
         .join('');
       const rowXml = sheet.rows.map((row) => {
         if (!row.length) return '<Row ss:Height="10" ss:StyleID="BorderRow"><Cell ss:StyleID="BorderCell"><Data ss:Type="String">&nbsp;</Data></Cell></Row>';
-        const isHeaderRow = row[0] === 'Type' || row[0] === 'Summary' || row[0] === 'Sales Summary' || row[0] === 'Disbursement Summary' || row[0] === 'Staff' || row[0] === 'Date of Sales' || row[0] === 'Date' || row[0] === 'Date/Month' || row[0] === 'Ticket';
+        const isHeaderRow = row[0] === 'Type' || row[0] === 'Summary' || row[0] === 'Sales Summary' || row[0] === 'Disbursement Summary' || row[0] === 'Disbursement by Category' || row[0] === 'Category' || row[0] === 'Staff' || row[0] === 'Date of Sales' || row[0] === 'Date' || row[0] === 'Date/Month' || row[0] === 'Ticket';
         const rowStyle = isHeaderRow ? 'HeaderRow' : 'BorderRow';
         const cellStyle = isHeaderRow ? 'HeaderCell' : 'BorderCell';
         const rowHeight = isHeaderRow ? 26 : 22;
@@ -3319,7 +3319,17 @@ function bindReportActions(orders: OrderRow[], payments: Payment[], sales: Daily
       ];
       sheets.push({ name: 'Sales Report', rows: salesRows });
     }
-    if (report.selectedTypes.has('disbursement')) sheets.push({ name: 'Disbursement', rows: report.disbursementRows().rows });
+    if (report.selectedTypes.has('disbursement')) {
+      const disbursementData = report.disbursementRows();
+      const disbursementRows: Array<Array<string | number>> = [
+        ...disbursementData.rows,
+        [],
+        ['Disbursement by Category'],
+        ['Category', 'Amount'],
+        ...disbursementData.categoryTotals.map((category) => [category.category, category.amount]),
+      ];
+      sheets.push({ name: 'Disbursement', rows: disbursementRows });
+    }
     if (report.selectedTypes.has('fold_count')) sheets.push({ name: 'Fold Count', rows: report.foldCountRows().rows });
     if (report.selectedTypes.has('revolving_fund')) {
       sheets.push({ name: 'Revolving Daily Summary', rows: report.revolvingDailySummaryRows().rows });
