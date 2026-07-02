@@ -3077,9 +3077,9 @@ function bindReportActions(orders: OrderRow[], payments: Payment[], sales: Daily
   };
 
   const saveMonthlySummaryToDevice = async () => {
-    const { fileName, dataUrl } = monthlySummaryArtifact();
+    const { fileName, dataUrl, report } = monthlySummaryArtifact();
     if (!Capacitor.isNativePlatform()) {
-      return { fileName, uri: '', dataUrl };
+      return { fileName, uri: '', dataUrl, report };
     }
 
     const path = fileName;
@@ -3090,7 +3090,7 @@ function bindReportActions(orders: OrderRow[], payments: Payment[], sales: Daily
       recursive: true,
     });
     const { uri } = await Filesystem.getUri({ path, directory: Directory.Cache });
-    return { fileName, uri, dataUrl };
+    return { fileName, uri, dataUrl, report };
   };
 
   const downloadMonthlySummary = () => {
