@@ -917,6 +917,121 @@ button {
   font-size: 1.1rem;
 }
 
+/* Disbursement Category Breakdown */
+.disbursement-category-summary {
+  margin-top: 16px;
+  padding: 16px;
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.disbursement-category-summary h4 {
+  margin: 0 0 12px;
+  color: var(--navy);
+  font-size: 0.95rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.category-breakdown-list {
+  display: grid;
+  gap: 6px;
+}
+
+.category-breakdown-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: #fff;
+  border: 1px solid var(--soft-line);
+  border-radius: 8px;
+}
+
+.category-breakdown-row span {
+  color: var(--navy);
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+
+.category-breakdown-row strong {
+  color: var(--navy);
+  font-size: 0.92rem;
+}
+
+/* Summary Report Layout */
+.summary-report-layout {
+  display: grid;
+  gap: 0;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.summary-section {
+  padding: 16px 20px;
+}
+
+.summary-section-header {
+  color: var(--navy);
+  font-size: 0.92rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+}
+
+.summary-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+}
+
+.summary-detail-row span {
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.summary-detail-row strong {
+  color: var(--navy);
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.summary-total-row {
+  margin-top: 4px;
+  padding-top: 6px;
+}
+
+.summary-total-row strong {
+  font-size: 1.15rem;
+  font-weight: 800;
+}
+
+.summary-formula span {
+  font-style: italic;
+  color: #94a3b8;
+  font-size: 0.78rem;
+}
+
+.summary-divider {
+  height: 1px;
+  background: var(--border);
+}
+
+.summary-detail-row strong.positive {
+  color: #16a34a;
+}
+
+.summary-detail-row strong.negative {
+  color: #dc2626;
+}
+
 .search-box {
   display: grid;
   gap: 12px;

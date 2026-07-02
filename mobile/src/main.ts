@@ -486,16 +486,25 @@ function buildReportData(orders: OrderRow[], payments: Payment[], sales: DailySa
     })),
   });
 
-  const disbursementRows = () => ({
-    totalExpenses,
-    totalDisbursement,
-    rows: [
-      ['Date/Month', 'id#', 'Type', 'Name', 'Category', 'Description', 'Amount'],
-      ...filteredExpenses.map((expense) => [expenseDateLabel(expense), expense.number, expenseType(expense), expense.name, expense.category ?? '', expense.description ?? '', expense.amount]),
-      [],
-      ['Total Disbursement', '', '', '', '', '', totalDisbursement],
-    ],
-  });
+  const disbursementRows = () => {
+    const categoryMap = new Map<string, number>();
+    filteredExpenses.forEach((expense) => {
+      const cat = expense.category || 'Uncategorized';
+      categoryMap.set(cat, (categoryMap.get(cat) ?? 0) + expense.amount);
+    });
+    const categoryTotals = Array.from(categoryMap.entries()).map(([category, amount]) => ({ category, amount }));
+    return {
+      totalExpenses,
+      totalDisbursement,
+      categoryTotals,
+      rows: [
+        ['Date/Month', 'id#', 'Type', 'Name', 'Category', 'Description', 'Amount'],
+        ...filteredExpenses.map((expense) => [expenseDateLabel(expense), expense.number, expenseType(expense), expense.name, expense.category ?? '', expense.description ?? '', expense.amount]),
+        [],
+        ['Total Disbursement', '', '', '', '', '', totalDisbursement],
+      ],
+    };
+  };
 
   const foldCountRows = () => ({
     rows: [
@@ -541,16 +550,21 @@ function buildReportData(orders: OrderRow[], payments: Payment[], sales: DailySa
   const summaryRows = () => {
     const salesData = salesRows();
     const disbursementData = disbursementRows();
+    const cashOnHand = computeCashOnHand(salesData.totalCash, disbursementData.totalDisbursement);
+    const netIncome = Number((salesData.totalSales - disbursementData.totalDisbursement).toFixed(2));
     return [
       ['Summary', selection.from, 'to', selection.to],
       [],
-      ['Total Cash:', 'Total GCash:', 'Total Sales:'],
-      ['', '', ''],
-      [salesData.totalCash, salesData.totalGcash, salesData.totalSales],
-      ['', '', ''],
-      ['Total Disbursement:', 'Total Profit:', 'Cash on Hand:'],
-      ['', '', ''],
-      [disbursementData.totalDisbursement, profit, computeCashOnHand(salesData.totalCash, disbursementData.totalDisbursement)],
+      ['Total Sales:', '', ''],
+      ['Cash:', '', salesData.totalCash],
+      ['GCash:', '', salesData.totalGcash],
+      ['Total:', '', salesData.totalSales],
+      [],
+      ['Total Disbursement:', '', disbursementData.totalDisbursement],
+      [],
+      ['Cash on Hand (Cash - Total Disbursement):', '', cashOnHand],
+      [],
+      ['Net Income (Total Sales - Total Disbursement):', '', netIncome],
     ];
   };
 
@@ -1651,7 +1665,9 @@ function renderReports(orders: OrderRow[], payments: Payment[], sales: DailySale
               </div>
             </div>
           </article>` : ''}
-        ${preview.selectedTypes.has('disbursement') ? `
+        ${preview.selectedTypes.has('disbursement') ? (() => {
+          const disbData = preview.disbursementRows();
+          return `
           <article>
             ${sectionTitle('Disbursement preview', `${preview.selection.from} to ${preview.selection.to}`)}
             <div style="overflow-x: auto; width: 100%; -webkit-overflow-scrolling: touch;">
@@ -1660,14 +1676,28 @@ function renderReports(orders: OrderRow[], payments: Payment[], sales: DailySale
                   <tr><th>ID#</th><th>Date/Month</th><th>Type</th><th>Name</th><th>Category</th><th>Amount</th></tr>
                 </thead>
                 <tbody>
-                  ${preview.disbursementRows().rows.slice(1).filter((row) => row.length && row[0] !== 'Total Disbursement').map((row) => `<tr><td>${escapeHtml(String(row[1] ?? ''))}</td><td>${escapeHtml(String(row[0] ?? ''))}</td><td>${escapeHtml(String(row[2] ?? ''))}</td><td>${escapeHtml(String(row[3] ?? ''))}</td><td>${escapeHtml(String(row[4] ?? ''))}</td><td><strong>${money(row[6] as number)}</strong></td></tr>`).join('') || '<tr><td colspan="6" class="table-empty">No disbursements found.</td></tr>'}
+                  ${disbData.rows.slice(1).filter((row) => row.length && row[0] !== 'Total Disbursement').map((row) => `<tr><td>${escapeHtml(String(row[1] ?? ''))}</td><td>${escapeHtml(String(row[0] ?? ''))}</td><td>${escapeHtml(String(row[2] ?? ''))}</td><td>${escapeHtml(String(row[3] ?? ''))}</td><td>${escapeHtml(String(row[4] ?? ''))}</td><td><strong>${money(row[6] as number)}</strong></td></tr>`).join('') || '<tr><td colspan="6" class="table-empty">No disbursements found.</td></tr>'}
                 </tbody>
               </table>
             </div>
-            <div class="disbursement-total" style="margin-top: 16px;">
-              <strong>Total Disbursement: ${money(preview.disbursementRows().totalDisbursement)}</strong>
+            ${disbData.categoryTotals.length ? `
+              <div class="disbursement-category-summary">
+                <h4>Disbursement by Category</h4>
+                <div class="category-breakdown-list">
+                  ${disbData.categoryTotals.map((cat) => `
+                    <div class="category-breakdown-row">
+                      <span>${escapeHtml(cat.category)}</span>
+                      <strong>${money(cat.amount)}</strong>
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+            ` : ''}
+            <div class="disbursement-total">
+              <strong>Total Disbursement: ${money(disbData.totalDisbursement)}</strong>
             </div>
-          </article>` : ''}
+          </article>`;
+        })() : ''}
         ${preview.selectedTypes.has('fold_count') ? `
           <article>
             ${sectionTitle('Fold Count preview', `${preview.selection.from} to ${preview.selection.to}`)}
@@ -1712,15 +1742,57 @@ function renderReports(orders: OrderRow[], payments: Payment[], sales: DailySale
               'data-table orders-data-table bordered-table',
             )}
           </article>` : ''}
-        ${preview.selectedTypes.has('summary') ? `
+        ${preview.selectedTypes.has('summary') ? (() => {
+          const salesData = preview.salesRows();
+          const disbData = preview.disbursementRows();
+          const cashOnHand = computeCashOnHand(salesData.totalCash, disbData.totalDisbursement);
+          const netIncome = Number((salesData.totalSales - disbData.totalDisbursement).toFixed(2));
+          return `
           <article>
             ${sectionTitle('Summary preview', `${preview.selection.from} to ${preview.selection.to}`)}
-            <div class="summary-cards-grid summary-single-row">
-              <div class="summary-card"><span class="card-label">Total Sales</span><div class="card-details"><span>Total Cash: ${money(preview.salesRows().totalCash)}</span><span>Total GCash: ${money(preview.salesRows().totalGcash)}</span></div><strong>${money(preview.salesRows().totalSales)}</strong></div>
-              <div class="summary-card"><span class="card-label">Total Disbursement</span><strong>${money(preview.disbursementRows().totalDisbursement)}</strong></div>
-              <div class="summary-card"><span class="card-label">Cash on Hand</span><strong>${money(computeCashOnHand(preview.salesRows().totalCash, preview.disbursementRows().totalDisbursement))}</strong></div>
+            <div class="summary-report-layout">
+              <div class="summary-section">
+                <div class="summary-section-header">Total Sales</div>
+                <div class="summary-detail-row">
+                  <span>Cash:</span><strong>${money(salesData.totalCash)}</strong>
+                </div>
+                <div class="summary-detail-row">
+                  <span>GCash:</span><strong>${money(salesData.totalGcash)}</strong>
+                </div>
+                <div class="summary-detail-row summary-total-row">
+                  <span>Total:</span><strong>${money(salesData.totalSales)}</strong>
+                </div>
+              </div>
+              <div class="summary-divider"></div>
+              <div class="summary-section">
+                <div class="summary-section-header">Total Disbursement</div>
+                <div class="summary-detail-row summary-total-row">
+                  <span></span><strong>${money(disbData.totalDisbursement)}</strong>
+                </div>
+              </div>
+              <div class="summary-divider"></div>
+              <div class="summary-section">
+                <div class="summary-section-header">Cash on Hand</div>
+                <div class="summary-detail-row summary-formula">
+                  <span>Cash − Total Disbursement</span>
+                </div>
+                <div class="summary-detail-row summary-total-row">
+                  <span></span><strong>${money(cashOnHand)}</strong>
+                </div>
+              </div>
+              <div class="summary-divider"></div>
+              <div class="summary-section">
+                <div class="summary-section-header">Net Income</div>
+                <div class="summary-detail-row summary-formula">
+                  <span>Total Sales − Total Disbursement</span>
+                </div>
+                <div class="summary-detail-row summary-total-row">
+                  <span></span><strong class="${netIncome >= 0 ? 'positive' : 'negative'}">${money(netIncome)}</strong>
+                </div>
+              </div>
             </div>
-          </article>` : ''}
+          </article>`;
+        })() : ''}
       </section>
     ` : ''}
   `;
