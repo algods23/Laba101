@@ -405,7 +405,7 @@ function renderMonthlySummaryImage(report: ReturnType<typeof buildMonthlySummary
   ctx.textAlign = 'left';
   ctx.fillStyle = '#061a42';
   ctx.font = '800 34px Arial';
-  ctx.fillText('Total sales', left, y);
+  ctx.fillText('Total Sales', left, y);
   y += 50;
   ctx.font = '500 28px Arial';
   ctx.fillStyle = '#475569';
@@ -440,7 +440,7 @@ function renderMonthlySummaryImage(report: ReturnType<typeof buildMonthlySummary
   ctx.textAlign = 'left';
   ctx.fillStyle = '#061a42';
   ctx.font = '800 34px Arial';
-  ctx.fillText('Total disbursement', left, y);
+  ctx.fillText('Total Disbursement', left, y);
   y += 50;
 
   ctx.font = '500 28px Arial';
@@ -478,7 +478,7 @@ function renderMonthlySummaryImage(report: ReturnType<typeof buildMonthlySummary
   ctx.textAlign = 'left';
   ctx.fillStyle = '#061a42';
   ctx.font = '800 34px Arial';
-  ctx.fillText('Net income', left, y);
+  ctx.fillText('Net Income', left, y);
   ctx.textAlign = 'right';
   ctx.fillStyle = report.netIncome >= 0 ? '#16a34a' : '#dc2626';
   ctx.font = '800 44px Arial';
@@ -1990,7 +1990,7 @@ function renderReports(orders: OrderRow[], payments: Payment[], sales: DailySale
               <div class="monthly-summary-period">For the month of ${escapeHtml(monthLabel)}</div>
               <div class="monthly-summary-divider"></div>
               <div class="monthly-summary-section">
-                <div class="monthly-summary-heading">Total sales</div>
+                <div class="monthly-summary-heading">Total Sales</div>
                 <div class="summary-detail-row">
                   <span>Cash:</span><strong>${money(salesData.totalCash)}</strong>
                 </div>
@@ -2003,7 +2003,7 @@ function renderReports(orders: OrderRow[], payments: Payment[], sales: DailySale
               </div>
               <div class="monthly-summary-divider"></div>
               <div class="monthly-summary-section">
-                <div class="monthly-summary-heading">Total disbursement</div>
+                <div class="monthly-summary-heading">Total Disbursement</div>
                 ${disbData.categoryTotals.map((cat) => `
                   <div class="summary-detail-row monthly-summary-category-row">
                     <span>${escapeHtml(cat.category)}:</span><strong>${money(cat.amount)}</strong>
@@ -2015,7 +2015,7 @@ function renderReports(orders: OrderRow[], payments: Payment[], sales: DailySale
               </div>
               <div class="monthly-summary-divider"></div>
               <div class="monthly-summary-section">
-                <div class="monthly-summary-heading">Net income</div>
+                <div class="monthly-summary-heading">Net Income</div>
                 <div class="summary-detail-row summary-total-row">
                   <span></span><strong class="${netIncome >= 0 ? 'positive' : 'negative'}">${money(netIncome)}</strong>
                 </div>
