@@ -121,7 +121,7 @@ type BluetoothThermalPrinterPlugin = {
 
 const BluetoothThermalPrinter = registerPlugin<BluetoothThermalPrinterPlugin>('BluetoothThermalPrinter');
 
-type TabKey = 'dashboard' | 'pos' | 'orders' | 'archived' | 'customers' | 'pricing' | 'disbursements' | 'reports' | 'logs' | 'inventory' | 'maintenance' | 'staff' | 'revolving' | 'settings';
+type TabKey = 'dashboard' | 'pos' | 'orders' | 'archived' | 'customers' | 'pricing' | 'disbursements' | 'reports' | 'logs' | 'inventory' | 'maintenance' | 'staff' | 'revolving' | 'settings' | 'machines';
 
 type ReportType = 'sales' | 'disbursement' | 'fold_count' | 'revolving_fund' | 'summary';
 
@@ -146,6 +146,7 @@ const tabLabels: Record<TabKey, string> = {
   staff: 'Staff',
   revolving: 'Revolving Fund',
   settings: 'Settings',
+  machines: 'Machine Control',
 };
 
 const state = {
@@ -181,12 +182,102 @@ const state = {
   disbursementModalOpen: false,
   revolvingHistoryFrom: '',
   revolvingHistoryTo: '',
+  machineControlModalOpen: false,
+  selectedMachineId: 0,
+  machineTimerMinutes: 0,
+  machineStatus: new Map<number, 'idle' | 'running' | 'paused' | 'completed'>(),
 };
 
 const serviceIncludeOptions = ['Wash', 'Dry', 'Fold', 'Detergent', 'Fabcon', 'Zonrox', 'Finishing'] as const;
 const disbursementCategories = ['Supplies', 'Utilities', 'Maintenance', 'Salary', 'Rent', 'Transport', 'Other'];
 
 const sessionKey = 'laba101-mobile-session';
+
+type MachineConfig = {
+  machineId: number;
+  ipAddress: string;
+  port: number;
+};
+
+const machineConfigs = new Map<number, MachineConfig>();
+
+async function sendMachineCommand(machineId: number, command: string, params?: Record<string, any>): Promise<{ success: boolean; message: string }> {
+  const config = machineConfigs.get(machineId);
+  if (!config) {
+    return { success: false, message: 'Machine not configured. Please set WiFi settings first.' };
+  }
+
+  try {
+    const url = `http://${config.ipAddress}:${config.port}/${command}`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(params || {}),
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const result = await response.json();
+    return { success: true, message: result.message || 'Command sent successfully' };
+  } catch (error) {
+    console.error('Machine control error:', error);
+    return { success: false, message: `Failed to connect to machine: ${error instanceof Error ? error.message : 'Unknown error'}` };
+  }
+}
+
+async function startMachine(machineId: number, minutes: number, machineType: 'washer' | 'dryer'): Promise<void> {
+  const result = await sendMachineCommand(machineId, 'start', { duration: minutes, type: machineType });
+  if (result.success) {
+    state.machineStatus.set(machineId, 'running');
+    await recordUiLog('machine_start', `Started ${machineType} ID ${machineId} for ${minutes} minutes`);
+  } else {
+    alert(result.message);
+  }
+  void render();
+}
+
+async function pauseMachine(machineId: number): Promise<void> {
+  const result = await sendMachineCommand(machineId, 'pause');
+  if (result.success) {
+    state.machineStatus.set(machineId, 'paused');
+    await recordUiLog('machine_pause', `Paused machine ID ${machineId}`);
+  } else {
+    alert(result.message);
+  }
+  void render();
+}
+
+async function resumeMachine(machineId: number): Promise<void> {
+  const result = await sendMachineCommand(machineId, 'resume');
+  if (result.success) {
+    state.machineStatus.set(machineId, 'running');
+    await recordUiLog('machine_resume', `Resumed machine ID ${machineId}`);
+  } else {
+    alert(result.message);
+  }
+  void render();
+}
+
+async function stopMachine(machineId: number): Promise<void> {
+  const result = await sendMachineCommand(machineId, 'stop');
+  if (result.success) {
+    state.machineStatus.set(machineId, 'idle');
+    await recordUiLog('machine_stop', `Stopped machine ID ${machineId}`);
+  } else {
+    alert(result.message);
+  }
+  void render();
+}
+
+async function resetMachine(machineId: number): Promise<void> {
+  state.machineStatus.set(machineId, 'idle');
+  await recordUiLog('machine_reset', `Reset machine ID ${machineId}`);
+  void render();
+}
 
 function money(value: number) {
   return new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(value || 0);
@@ -836,6 +927,7 @@ function navIcon(tab: TabKey) {
     staff: 'ST',
     revolving: 'RV',
     settings: 'SE',
+    machines: 'MC',
   };
   return icons[tab];
 }
@@ -969,6 +1061,7 @@ async function render() {
         ${state.tab === 'staff' ? renderStaff(data.allStaff, data.branch) : ''}
         ${state.tab === 'revolving' ? renderRevolving(data.sales, data.revolvingHistory, data.orders, data.expenses) : ''}
         ${state.tab === 'settings' ? renderSettings(data.branch, data.foldRate, data.reportEmail) : ''}
+        ${state.tab === 'machines' ? renderMachineControl(data.machines, data.branch) : ''}
       </main>
     </div>
   `;
@@ -985,13 +1078,14 @@ async function render() {
   bindStaffForms(data.allStaff);
   bindRevolvingForms();
   bindSettingsForms();
+  bindMachineControlForms();
   bindDashboardClock();
 }
 
 function visibleTabs(): TabKey[] {
   if (state.currentUser?.role === 'admin') return Object.keys(tabLabels) as TabKey[];
-  const staffTabs: TabKey[] = ['dashboard', 'pos', 'orders', 'archived', 'disbursements', 'reports', 'maintenance', 'revolving'];
-  if (isGensanStaff(state.currentUser)) return ['dashboard', 'disbursements', 'reports', 'maintenance', 'revolving'];
+  const staffTabs: TabKey[] = ['dashboard', 'pos', 'orders', 'archived', 'disbursements', 'reports', 'maintenance', 'revolving', 'machines'];
+  if (isGensanStaff(state.currentUser)) return ['dashboard', 'disbursements', 'reports', 'maintenance', 'revolving', 'machines'];
   return isMintalStaff(state.currentUser) ? staffTabs.filter((tab) => tab !== 'revolving') : staffTabs;
 }
 
@@ -2316,6 +2410,122 @@ function renderSettings(branch: string, foldRate: number, reportEmail: string) {
           </select></label>
           <label>Report email<input name="reportEmail" type="email" placeholder="admin@laba101.test" value="${escapeHtml(reportEmail)}" /></label>
           <button class="primary" type="submit">Save settings</button>
+        </form>
+      </article>
+    </section>
+  `;
+}
+
+function renderMachineControl(machines: Machine[], branch: string) {
+  const washers = machines.filter((m) => m.machineType === 'washer' && m.status === 'available');
+  const dryers = machines.filter((m) => m.machineType === 'dryer' && m.status === 'available');
+  
+  return `
+    <section class="page-head">
+      <div>
+        <h2>Machine Control</h2>
+        <p class="meta">Control washer and dryer machines via WiFi connection</p>
+      </div>
+    </section>
+    <section class="grid content full">
+      <article class="panel">
+        ${sectionTitle('Washers', 'Start and control washing machines')}
+        <div class="machine-grid">
+          ${washers.length ? washers.map((machine) => {
+            const status = state.machineStatus.get(machine.id) || 'idle';
+            return `
+              <div class="machine-control-card ${status}">
+                <div class="machine-header">
+                  <strong>${escapeHtml(machine.machineName)}</strong>
+                  <span class="machine-type">Washer</span>
+                </div>
+                <div class="machine-status-indicator ${status}">
+                  ${status === 'idle' ? 'Idle' : status === 'running' ? 'Running' : status === 'paused' ? 'Paused' : 'Completed'}
+                </div>
+                ${status === 'idle' ? `
+                  <div class="machine-controls">
+                    <label>Timer (minutes)
+                      <input type="number" class="timer-input" data-machine-id="${machine.id}" min="1" max="120" value="30" />
+                    </label>
+                    <button class="primary start-machine-btn" data-machine-id="${machine.id}" data-machine-type="washer" type="button">Start</button>
+                  </div>
+                ` : status === 'running' ? `
+                  <div class="machine-controls">
+                    <button class="warning pause-machine-btn" data-machine-id="${machine.id}" type="button">Pause</button>
+                    <button class="secondary stop-machine-btn" data-machine-id="${machine.id}" type="button">Stop</button>
+                  </div>
+                ` : status === 'paused' ? `
+                  <div class="machine-controls">
+                    <button class="primary resume-machine-btn" data-machine-id="${machine.id}" type="button">Resume</button>
+                    <button class="secondary stop-machine-btn" data-machine-id="${machine.id}" type="button">Stop</button>
+                  </div>
+                ` : `
+                  <div class="machine-controls">
+                    <button class="secondary reset-machine-btn" data-machine-id="${machine.id}" type="button">Reset</button>
+                  </div>
+                `}
+              </div>
+            `;
+          }).join('') : '<p class="helper">No available washers found.</p>'}
+        </div>
+      </article>
+      <article class="panel">
+        ${sectionTitle('Dryers', 'Start and control drying machines')}
+        <div class="machine-grid">
+          ${dryers.length ? dryers.map((machine) => {
+            const status = state.machineStatus.get(machine.id) || 'idle';
+            return `
+              <div class="machine-control-card ${status}">
+                <div class="machine-header">
+                  <strong>${escapeHtml(machine.machineName)}</strong>
+                  <span class="machine-type">Dryer</span>
+                </div>
+                <div class="machine-status-indicator ${status}">
+                  ${status === 'idle' ? 'Idle' : status === 'running' ? 'Running' : status === 'paused' ? 'Paused' : 'Completed'}
+                </div>
+                ${status === 'idle' ? `
+                  <div class="machine-controls">
+                    <label>Timer (minutes)
+                      <input type="number" class="timer-input" data-machine-id="${machine.id}" min="1" max="120" value="45" />
+                    </label>
+                    <button class="primary start-machine-btn" data-machine-id="${machine.id}" data-machine-type="dryer" type="button">Start</button>
+                  </div>
+                ` : status === 'running' ? `
+                  <div class="machine-controls">
+                    <button class="warning pause-machine-btn" data-machine-id="${machine.id}" type="button">Pause</button>
+                    <button class="secondary stop-machine-btn" data-machine-id="${machine.id}" type="button">Stop</button>
+                  </div>
+                ` : status === 'paused' ? `
+                  <div class="machine-controls">
+                    <button class="primary resume-machine-btn" data-machine-id="${machine.id}" type="button">Resume</button>
+                    <button class="secondary stop-machine-btn" data-machine-id="${machine.id}" type="button">Stop</button>
+                  </div>
+                ` : `
+                  <div class="machine-controls">
+                    <button class="secondary reset-machine-btn" data-machine-id="${machine.id}" type="button">Reset</button>
+                  </div>
+                `}
+              </div>
+            `;
+          }).join('') : '<p class="helper">No available dryers found.</p>'}
+        </div>
+      </article>
+      <article class="panel span-2">
+        ${sectionTitle('Machine Configuration', 'Configure WiFi settings for machines')}
+        <form id="machine-config-form" class="form">
+          <label>Select Machine
+            <select name="machineId" required>
+              <option value="">-- Select a machine --</option>
+              ${machines.map((machine) => `<option value="${machine.id}">${escapeHtml(machine.machineName)} (${machine.machineType})</option>`).join('')}
+            </select>
+          </label>
+          <label>WiFi IP Address
+            <input type="text" name="ipAddress" placeholder="192.168.1.100" pattern="^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}$" required />
+          </label>
+          <label>Port
+            <input type="number" name="port" placeholder="8080" min="1" max="65535" value="8080" required />
+          </label>
+          <button class="primary" type="submit">Save Configuration</button>
         </form>
       </article>
     </section>
@@ -3675,6 +3885,72 @@ function bindSettingsForms() {
   });
 }
 
+function bindMachineControlForms() {
+  document.querySelector<HTMLFormElement>('#machine-config-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const fd = new FormData(event.currentTarget);
+    const machineId = Number(fd.get('machineId'));
+    const ipAddress = String(fd.get('ipAddress'));
+    const port = Number(fd.get('port'));
+
+    if (!machineId || !ipAddress || !port) {
+      alert('Please fill in all fields');
+      return;
+    }
+
+    machineConfigs.set(machineId, { machineId, ipAddress, port });
+    await setSetting(`machine_${machineId}_config`, JSON.stringify({ machineId, ipAddress, port }));
+    alert('Machine configuration saved successfully!');
+    void render();
+  });
+
+  document.querySelectorAll<HTMLButtonElement>('.start-machine-btn').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const machineId = Number(button.dataset.machineId);
+      const machineType = button.dataset.machineType as 'washer' | 'dryer';
+      const timerInput = document.querySelector<HTMLInputElement>(`.timer-input[data-machine-id="${machineId}"]`);
+      const minutes = Number(timerInput?.value) || 30;
+
+      if (minutes < 1 || minutes > 120) {
+        alert('Please enter a valid time between 1 and 120 minutes');
+        return;
+      }
+
+      await startMachine(machineId, minutes, machineType);
+    });
+  });
+
+  document.querySelectorAll<HTMLButtonElement>('.pause-machine-btn').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const machineId = Number(button.dataset.machineId);
+      await pauseMachine(machineId);
+    });
+  });
+
+  document.querySelectorAll<HTMLButtonElement>('.resume-machine-btn').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const machineId = Number(button.dataset.machineId);
+      await resumeMachine(machineId);
+    });
+  });
+
+  document.querySelectorAll<HTMLButtonElement>('.stop-machine-btn').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const machineId = Number(button.dataset.machineId);
+      if (confirm('Are you sure you want to stop this machine?')) {
+        await stopMachine(machineId);
+      }
+    });
+  });
+
+  document.querySelectorAll<HTMLButtonElement>('.reset-machine-btn').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const machineId = Number(button.dataset.machineId);
+      await resetMachine(machineId);
+    });
+  });
+}
+
 async function initApp() {
   await initOfflineStore();
   const savedSession = localStorage.getItem(sessionKey);
@@ -3689,6 +3965,20 @@ async function initApp() {
       localStorage.removeItem(sessionKey);
     }
   }
+
+  const data = await loadData();
+  for (const machine of data.machines) {
+    const configStr = await getSetting(`machine_${machine.id}_config`);
+    if (configStr) {
+      try {
+        const config = JSON.parse(configStr) as MachineConfig;
+        machineConfigs.set(machine.id, config);
+      } catch {
+        console.error(`Failed to parse config for machine ${machine.id}`);
+      }
+    }
+  }
+
   await render();
 }
 

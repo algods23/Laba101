@@ -3095,3 +3095,130 @@ legend {
     box-shadow: none;
   }
 }
+
+.machine-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.machine-control-card {
+  border: 2px solid var(--line);
+  border-radius: 16px;
+  padding: 16px;
+  background: var(--panel);
+  transition: all 0.3s ease;
+}
+
+.machine-control-card.idle {
+  border-color: var(--success);
+}
+
+.machine-control-card.running {
+  border-color: #3b82f6;
+  background: #eff6ff;
+}
+
+.machine-control-card.paused {
+  border-color: #f59e0b;
+  background: #fef3c7;
+}
+
+.machine-control-card.completed {
+  border-color: #10b981;
+  background: #d1fae5;
+}
+
+.machine-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.machine-header strong {
+  color: var(--navy);
+  font-size: 1rem;
+}
+
+.machine-type {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--soft);
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.machine-status-indicator {
+  text-align: center;
+  padding: 8px;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 0.875rem;
+  margin-bottom: 12px;
+}
+
+.machine-status-indicator.idle {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.machine-status-indicator.running {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.machine-status-indicator.paused {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.machine-status-indicator.completed {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.machine-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.machine-controls label {
+  font-size: 0.875rem;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.timer-input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 1rem;
+  background: var(--light-bg);
+}
+
+.timer-input:focus {
+  outline: none;
+  border-color: var(--navy-2);
+  box-shadow: 0 0 0 3px rgba(8, 40, 95, 0.1);
+}
+
+.machine-controls button {
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 0.875rem;
+  transition: all 0.2s ease;
+}
+
+.machine-controls button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.machine-controls button:active {
+  transform: translateY(0);
+}
